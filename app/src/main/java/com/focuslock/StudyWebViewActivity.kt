@@ -28,6 +28,7 @@ class StudyWebViewActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var searchBar: EditText
+    private lateinit var videoGate: VideoGate
 
     private val handler = Handler(Looper.getMainLooper())
     private var lastSearch = "maths grade 11 sinhala"
@@ -52,30 +53,12 @@ class StudyWebViewActivity : AppCompatActivity() {
         "Education" to "education sinhala tutorial"
     )
 
-    // ── Study terms filter ───────────────────────────────────────────────────
-    private val studyTerms = listOf(
-        "study", "lesson", "past paper", "science", "history", "maths",
-        "sinhala", "revision", "grade 11", "o/l", "tutorial", "lecture",
-        "education", "school", "algebra", "biology", "chemistry", "physics",
-        "geography", "english", "civics", "buddhism", "ict", "commerce",
-        "ol", "grade11", "a/l", "grade 10", "medium"
-    )
-
     private val allowedHosts = setOf(
         "m.youtube.com", "www.youtube.com", "youtube.com",
         "accounts.google.com", "consent.youtube.com"
     )
 
-    // Short terms (ol, ict, ...) must match as whole words, so "tool"/"predict" don't pass
-    private fun isStudyQuery(q: String): Boolean {
-        val lower = q.lowercase(Locale.ROOT)
-        return studyTerms.any { term ->
-            if (term.length <= 3) {
-                Regex("(^|[^a-z0-9/])" + Regex.escape(term) + "($|[^a-z0-9/])")
-                    .containsMatchIn(lower)
-            } else lower.contains(term)
-        }
-    }
+    private fun isStudyQuery(q: String) = StudyFilter.isStudyQuery(q)
 
     /** Returns a message if this URL must be blocked, otherwise null. */
     private fun blockReason(raw: String): String? {
@@ -99,7 +82,11 @@ class StudyWebViewActivity : AppCompatActivity() {
     // check the current URL regularly and push the user back to a study search.
     private fun enforceUrl(url: String?) {
         if (url.isNullOrEmpty() || url.startsWith("about:") || url.startsWith("data:")) return
-        val reason = blockReason(url) ?: return
+        val reason = blockReason(url)
+        if (reason == null) {
+            videoGate.onUrl(url)
+            return
+        }
         val now = SystemClock.elapsedRealtime()
         if (now - lastRedirectAt < 2500L) return
         lastRedirectAt = now
@@ -111,6 +98,7 @@ class StudyWebViewActivity : AppCompatActivity() {
     private val urlWatcher = object : Runnable {
         override fun run() {
             enforceUrl(webView.url)
+            videoGate.tick()
             handler.postDelayed(this, 600L)
         }
     }
@@ -132,6 +120,7 @@ class StudyWebViewActivity : AppCompatActivity() {
         webView   = findViewById(R.id.studyWebView)
         searchBar = findViewById(R.id.searchBar)
         webView.setBackgroundColor(0xFF0A0A0F.toInt())
+        videoGate = VideoGate(this, webView, findViewById(R.id.checkOverlay))
 
         // ── Back button ──────────────────────────────────────────────────────
         findViewById<TextView>(R.id.btnBack).setOnClickListener {
@@ -316,6 +305,7 @@ class StudyWebViewActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(urlWatcher)
+        videoGate.destroy()
         webView.stopLoading()
         webView.destroy()
         super.onDestroy()

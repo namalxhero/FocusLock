@@ -23,6 +23,8 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build debug APK
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           set -o pipefail
           ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log || { echo "::error::$(grep -E '^e: |What went wrong|Could not|error:|FAILED' -A3 build.log | head -20 | tr '\n' ' ' | cut -c1-1800)"; exit 1; }

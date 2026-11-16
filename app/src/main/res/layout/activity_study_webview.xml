@@ -84,10 +84,28 @@
         android:background="#1A1A2A" />
 
     <!-- WebView -->
-    <WebView
-        android:id="@+id/studyWebView"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1">
+
+        <WebView
+            android:id="@+id/studyWebView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <TextView
+            android:id="@+id/checkOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#0A0A0F"
+            android:gravity="center"
+            android:text="🔍 Checking if this is a study video…"
+            android:textColor="#7FDBBB"
+            android:textSize="16sp"
+            android:visibility="gone"
+            android:clickable="true"
+            android:focusable="true" />
+    </FrameLayout>
 
 </LinearLayout>
