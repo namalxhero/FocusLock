@@ -73,6 +73,7 @@ class StudyWebViewActivity : AppCompatActivity() {
 
         webView   = findViewById(R.id.studyWebView)
         searchBar = findViewById(R.id.searchBar)
+        webView.setBackgroundColor(0xFF0A0A0F.toInt())
 
         // ── Back button ──────────────────────────────────────────────────────
         findViewById<TextView>(R.id.btnBack).setOnClickListener {
@@ -240,9 +241,11 @@ class StudyWebViewActivity : AppCompatActivity() {
                 '[data-content-type="shorts"]'
               ].join(',') + '{display:none!important}';
               function apply(){
-                var s=document.getElementById('fl');
-                if(!s){s=document.createElement('style');s.id='fl';document.head.appendChild(s);}
+                if(document.getElementById('fl')) return;
+                var s=document.createElement('style');
+                s.id='fl';
                 s.textContent=css;
+                (document.head||document.documentElement).appendChild(s);
               }
               apply();
               if(!window.__fl){
