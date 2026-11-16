@@ -23,7 +23,9 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log || { echo "::error::$(grep -E '^e: |What went wrong|Could not|error:|FAILED' -A3 build.log | head -20 | tr '\n' ' ' | cut -c1-1800)"; exit 1; }
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
