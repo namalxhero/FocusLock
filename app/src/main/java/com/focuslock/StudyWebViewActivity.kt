@@ -15,6 +15,8 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.util.Locale
 
 class StudyWebViewActivity : AppCompatActivity() {
@@ -59,6 +61,15 @@ class StudyWebViewActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_study_webview)
+
+        // Keep the top bar below the status bar and above the keyboard / nav bar
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById<View>(R.id.studyRoot)) { v, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime()
+            )
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
 
         webView   = findViewById(R.id.studyWebView)
         searchBar = findViewById(R.id.searchBar)
@@ -124,6 +135,30 @@ class StudyWebViewActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
                 filterUrl(url)
 
+            override fun onReceivedError(
+                view: WebView, request: WebResourceRequest,
+                error: android.webkit.WebResourceError
+            ) {
+                if (request.isForMainFrame) {
+                    Toast.makeText(
+                        this@StudyWebViewActivity,
+                        "Load error: ${error.description}", Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+
+            override fun onReceivedHttpError(
+                view: WebView, request: WebResourceRequest,
+                errorResponse: android.webkit.WebResourceResponse
+            ) {
+                if (request.isForMainFrame) {
+                    Toast.makeText(
+                        this@StudyWebViewActivity,
+                        "HTTP ${errorResponse.statusCode}", Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
                 injectFocusStyles(view)
@@ -163,7 +198,10 @@ class StudyWebViewActivity : AppCompatActivity() {
     private fun filterUrl(raw: String): Boolean {
         val uri  = Uri.parse(raw)
         val host = (uri.host ?: "").lowercase(Locale.ROOT)
-        if (host !in allowedHosts) return true
+        if (host !in allowedHosts) {
+            Toast.makeText(this, "Blocked: $host", Toast.LENGTH_SHORT).show()
+            return true
+        }
         if (host.endsWith("google.com")) return false
 
         val path = uri.path.orEmpty()
