@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#0A0A0F" android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center_horizontal" android:orientation="vertical"
+        android:padding="28dp">
+
+        <!-- Title -->
+        <TextView
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="48dp"
+            android:text="FOCUS LOCK"
+            android:textColor="#FFFFFF" android:textSize="22sp"
+            android:textStyle="bold" android:letterSpacing="0.3" />
+
+        <TextView
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="O/L 25-Day Challenge"
+            android:textColor="#6B6B80" android:textSize="13sp" />
+
+        <!-- Sri Lanka current time -->
+        <TextView
+            android:id="@+id/currentTime"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="🕐 00:00:00"
+            android:textColor="#5A5A70" android:textSize="13sp"
+            android:fontFamily="monospace" />
+
+        <!-- Unlock date -->
+        <TextView
+            android:id="@+id/unlockDate"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Unlocks: --"
+            android:textColor="#4A4A60" android:textSize="12sp" />
+
+        <!-- Countdown -->
+        <TextView
+            android:id="@+id/countdown"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="25d 00h 00m 00s"
+            android:textColor="#7FDBBB" android:textSize="32sp" android:textStyle="bold"
+            android:fontFamily="monospace" />
+
+        <!-- Status -->
+        <TextView
+            android:id="@+id/status"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center"
+            android:text="Focus mode active"
+            android:textColor="#9090A8" android:textSize="13sp" />
+
+        <!-- Device Admin warning (shown if not active) -->
+        <TextView
+            android:id="@+id/adminWarning"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:gravity="center"
+            android:text="⚠️ Device Admin not active! Tap to fix."
+            android:textColor="#FF6B6B" android:textSize="12sp"
+            android:visibility="gone"
+            android:padding="8dp"
+            android:background="#2A1010" />
+
+        <!-- Divider -->
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:layout_marginTop="32dp" android:layout_marginBottom="8dp"
+            android:background="#1E1E2A" />
+
+        <!-- Study YouTube -->
+        <Button
+            android:id="@+id/studyButton"
+            android:layout_width="match_parent" android:layout_height="60dp"
+            android:layout_marginTop="12dp"
+            android:text="📚  Study YouTube"
+            android:backgroundTint="#1A3A2A"
+            android:textColor="#7FDBBB" android:textSize="15sp" android:textStyle="bold"
+            android:stateListAnimator="@null" />
+
+        <!-- WhatsApp -->
+        <Button
+            android:id="@+id/whatsappButton"
+            android:layout_width="match_parent" android:layout_height="60dp"
+            android:layout_marginTop="10dp"
+            android:text="💬  WhatsApp"
+            android:backgroundTint="#1A2A1A"
+            android:textColor="#A8E6A8" android:textSize="15sp" android:textStyle="bold"
+            android:stateListAnimator="@null" />
+
+        <!-- Phone Calls -->
+        <Button
+            android:id="@+id/callsButton"
+            android:layout_width="match_parent" android:layout_height="60dp"
+            android:layout_marginTop="10dp"
+            android:text="📞  Phone Calls"
+            android:backgroundTint="#1A2030"
+            android:textColor="#8BB8DB" android:textSize="15sp" android:textStyle="bold"
+            android:stateListAnimator="@null" />
+
+        <!-- Alarms -->
+        <Button
+            android:id="@+id/alarmsButton"
+            android:layout_width="match_parent" android:layout_height="60dp"
+            android:layout_marginTop="10dp"
+            android:text="⏰  Alarms"
+            android:backgroundTint="#2A2010"
+            android:textColor="#DBC88B" android:textSize="15sp" android:textStyle="bold"
+            android:stateListAnimator="@null" />
+
+        <!-- Footer note -->
+        <TextView
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="32dp" android:layout_marginBottom="24dp"
+            android:gravity="center"
+            android:text="Emergency calls (112) always available via dialer.\nThis device is in study mode until the timer ends."
+            android:textColor="#44444F" android:textSize="11sp" />
+
+    </LinearLayout>
+</ScrollView>
