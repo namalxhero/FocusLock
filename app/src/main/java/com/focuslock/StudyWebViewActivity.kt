@@ -3,11 +3,16 @@ package com.focuslock
 import android.annotation.SuppressLint
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
@@ -23,6 +28,10 @@ class StudyWebViewActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var searchBar: EditText
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var lastSearch = "maths grade 11 sinhala"
+    private var lastRedirectAt = 0L
 
     // ── Keyword chips ────────────────────────────────────────────────────────
     private val chips = listOf(
@@ -56,6 +65,55 @@ class StudyWebViewActivity : AppCompatActivity() {
         "m.youtube.com", "www.youtube.com", "youtube.com",
         "accounts.google.com", "consent.youtube.com"
     )
+
+    // Short terms (ol, ict, ...) must match as whole words, so "tool"/"predict" don't pass
+    private fun isStudyQuery(q: String): Boolean {
+        val lower = q.lowercase(Locale.ROOT)
+        return studyTerms.any { term ->
+            if (term.length <= 3) {
+                Regex("(^|[^a-z0-9/])" + Regex.escape(term) + "($|[^a-z0-9/])")
+                    .containsMatchIn(lower)
+            } else lower.contains(term)
+        }
+    }
+
+    /** Returns a message if this URL must be blocked, otherwise null. */
+    private fun blockReason(raw: String): String? {
+        val uri = Uri.parse(raw)
+        val host = (uri.host ?: "").lowercase(Locale.ROOT)
+        if (host !in allowedHosts) return "Blocked: $host"
+        if (host == "consent.youtube.com" || host.endsWith("google.com")) return null
+
+        val path = uri.path.orEmpty()
+        if (path.contains("/shorts")) return "Shorts blocked 🚫"
+        if (path.isEmpty() || path == "/" || path.startsWith("/feed") ||
+            path.startsWith("/hashtag") || path.startsWith("/gaming")
+        ) return "Home / feeds blocked 🚫"
+
+        val q = uri.getQueryParameter("search_query")
+        if (q != null && !isStudyQuery(q)) return "📚 Study searches only!"
+        return null
+    }
+
+    // YouTube navigates inside the page without a real page load, so we also
+    // check the current URL regularly and push the user back to a study search.
+    private fun enforceUrl(url: String?) {
+        if (url.isNullOrEmpty() || url.startsWith("about:") || url.startsWith("data:")) return
+        val reason = blockReason(url) ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastRedirectAt < 2500L) return
+        lastRedirectAt = now
+        Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
+        webView.stopLoading()
+        loadSearch(lastSearch)
+    }
+
+    private val urlWatcher = object : Runnable {
+        override fun run() {
+            enforceUrl(webView.url)
+            handler.postDelayed(this, 600L)
+        }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -136,9 +194,13 @@ class StudyWebViewActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
                 filterUrl(url)
 
+            override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
+                super.doUpdateVisitedHistory(view, url, isReload)
+                enforceUrl(url)
+            }
+
             override fun onReceivedError(
-                view: WebView, request: WebResourceRequest,
-                error: android.webkit.WebResourceError
+                view: WebView, request: WebResourceRequest, error: WebResourceError
             ) {
                 if (request.isForMainFrame) {
                     Toast.makeText(
@@ -149,8 +211,7 @@ class StudyWebViewActivity : AppCompatActivity() {
             }
 
             override fun onReceivedHttpError(
-                view: WebView, request: WebResourceRequest,
-                errorResponse: android.webkit.WebResourceResponse
+                view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse
             ) {
                 if (request.isForMainFrame) {
                     Toast.makeText(
@@ -167,7 +228,17 @@ class StudyWebViewActivity : AppCompatActivity() {
         }
 
         // Open with Education / Maths search by default
-        loadSearch("maths grade 11 sinhala")
+        loadSearch(lastSearch)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        handler.post(urlWatcher)
+    }
+
+    override fun onPause() {
+        handler.removeCallbacks(urlWatcher)
+        super.onPause()
     }
 
     // ── Search ───────────────────────────────────────────────────────────────
@@ -176,8 +247,7 @@ class StudyWebViewActivity : AppCompatActivity() {
         if (q.isEmpty()) return
         hideKeyboard()
 
-        val lower = q.lowercase(Locale.ROOT)
-        if (studyTerms.none { lower.contains(it) }) {
+        if (!isStudyQuery(q)) {
             Toast.makeText(this, "📚 Study topics only! (maths, science, sinhala...)", Toast.LENGTH_SHORT).show()
             return
         }
@@ -185,6 +255,7 @@ class StudyWebViewActivity : AppCompatActivity() {
     }
 
     private fun loadSearch(query: String) {
+        lastSearch = query
         val url = "https://m.youtube.com/results?search_query=${Uri.encode(query)}"
         webView.loadUrl(url)
         searchBar.setText(query)
@@ -195,34 +266,11 @@ class StudyWebViewActivity : AppCompatActivity() {
         imm.hideSoftInputFromWindow(searchBar.windowToken, 0)
     }
 
-    // ── URL filter ───────────────────────────────────────────────────────────
+    // ── URL filter for normal page loads ─────────────────────────────────────
     private fun filterUrl(raw: String): Boolean {
-        val uri  = Uri.parse(raw)
-        val host = (uri.host ?: "").lowercase(Locale.ROOT)
-        if (host !in allowedHosts) {
-            Toast.makeText(this, "Blocked: $host", Toast.LENGTH_SHORT).show()
-            return true
-        }
-        if (host.endsWith("google.com")) return false
-
-        val path = uri.path.orEmpty()
-
-        // Block Shorts
-        if (path.contains("/shorts/")) {
-            Toast.makeText(this, "Shorts blocked 🚫", Toast.LENGTH_SHORT).show()
-            return true
-        }
-
-        // Block non-study searches
-        if (uri.getQueryParameter("search_query") != null) {
-            val q = uri.getQueryParameter("search_query").orEmpty().lowercase(Locale.ROOT)
-            if (studyTerms.none { q.contains(it) }) {
-                Toast.makeText(this, "📚 Study searches only!", Toast.LENGTH_SHORT).show()
-                return true
-            }
-        }
-
-        return false
+        val reason = blockReason(raw) ?: return false
+        Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
+        return true
     }
 
     // ── Inject CSS to hide non-study elements ────────────────────────────────
@@ -236,9 +284,13 @@ class StudyWebViewActivity : AppCompatActivity() {
                 'ytm-reel-shelf-renderer',
                 'ytm-compact-autoplay-renderer',
                 'ytm-comments-entry-point-header-renderer',
+                'ytm-shorts-lockup-view-model',
+                'ytm-shorts-lockup-view-model-v2',
+                'ytm-item-section-renderer[section-identifier="related-items"]',
                 '#shorts-container',
                 'ytm-reel-item-renderer',
-                '[data-content-type="shorts"]'
+                '[data-content-type="shorts"]',
+                'a[href^="/shorts/"]'
               ].join(',') + '{display:none!important}';
               function apply(){
                 if(document.getElementById('fl')) return;
@@ -263,6 +315,7 @@ class StudyWebViewActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(urlWatcher)
         webView.stopLoading()
         webView.destroy()
         super.onDestroy()
