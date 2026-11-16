@@ -3,21 +3,51 @@ package com.focuslock
 import android.annotation.SuppressLint
 import android.net.Uri
 import android.os.Bundle
+import android.view.KeyEvent
+import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import java.util.Locale
 
 class StudyWebViewActivity : AppCompatActivity() {
-    private lateinit var webView: WebView
 
+    private lateinit var webView: WebView
+    private lateinit var searchBar: EditText
+
+    // ── Keyword chips ────────────────────────────────────────────────────────
+    private val chips = listOf(
+        "Maths" to "maths grade 11 sinhala",
+        "Science" to "science grade 11 sinhala",
+        "Sinhala" to "sinhala language grade 11",
+        "English" to "english grade 11 ol",
+        "History" to "history grade 11 sinhala",
+        "Biology" to "biology grade 11 sinhala",
+        "Chemistry" to "chemistry grade 11 sinhala",
+        "Physics" to "physics grade 11 sinhala",
+        "Geography" to "geography grade 11 sinhala",
+        "Commerce" to "commerce grade 11 sinhala",
+        "ICT" to "ict grade 11 sinhala",
+        "Buddhism" to "buddhism grade 11 sinhala",
+        "Civics" to "civics grade 11 sinhala",
+        "Past Papers" to "ol past paper sinhala",
+        "Education" to "education sinhala tutorial"
+    )
+
+    // ── Study terms filter ───────────────────────────────────────────────────
     private val studyTerms = listOf(
         "study", "lesson", "past paper", "science", "history", "maths",
         "sinhala", "revision", "grade 11", "o/l", "tutorial", "lecture",
         "education", "school", "algebra", "biology", "chemistry", "physics",
-        "geography", "english", "civics", "buddhism", "ict", "commerce"
+        "geography", "english", "civics", "buddhism", "ict", "commerce",
+        "ol", "grade11", "a/l", "grade 10", "medium"
     )
 
     private val allowedHosts = setOf(
@@ -29,8 +59,54 @@ class StudyWebViewActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_study_webview)
-        webView = findViewById(R.id.studyWebView)
 
+        webView   = findViewById(R.id.studyWebView)
+        searchBar = findViewById(R.id.searchBar)
+
+        // ── Back button ──────────────────────────────────────────────────────
+        findViewById<TextView>(R.id.btnBack).setOnClickListener {
+            if (webView.canGoBack()) webView.goBack() else finish()
+        }
+
+        // ── Search button ────────────────────────────────────────────────────
+        findViewById<TextView>(R.id.btnSearch).setOnClickListener {
+            performSearch()
+        }
+
+        // ── Search bar enter key ─────────────────────────────────────────────
+        searchBar.setOnEditorActionListener { _, actionId, event ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH ||
+                (event?.keyCode == KeyEvent.KEYCODE_ENTER)) {
+                performSearch()
+                true
+            } else false
+        }
+
+        // ── Build keyword chips ───────────────────────────────────────────────
+        val container = findViewById<LinearLayout>(R.id.chipContainer)
+        for ((label, query) in chips) {
+            val chip = TextView(this).apply {
+                text = label
+                textSize = 12f
+                setTextColor(0xFF7FDBBB.toInt())
+                setPadding(24, 8, 24, 8)
+                val bg = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(0xFF1A3A2A.toInt())
+                    cornerRadius = 40f
+                    setStroke(1, 0xFF2A5A44.toInt())
+                }
+                background = bg
+                val lp = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(6, 0, 6, 0) }
+                layoutParams = lp
+                setOnClickListener { loadSearch(query) }
+            }
+            container.addView(chip)
+        }
+
+        // ── WebView setup ────────────────────────────────────────────────────
         webView.settings.apply {
             javaScriptEnabled                     = true
             domStorageEnabled                     = true
@@ -40,8 +116,9 @@ class StudyWebViewActivity : AppCompatActivity() {
         }
 
         webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                filterUrl(request.url.toString())
+            override fun shouldOverrideUrlLoading(
+                view: WebView, request: WebResourceRequest
+            ): Boolean = filterUrl(request.url.toString())
 
             @Suppress("DEPRECATION")
             override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
@@ -52,19 +129,43 @@ class StudyWebViewActivity : AppCompatActivity() {
                 injectFocusStyles(view)
             }
         }
-        webView.loadUrl("https://m.youtube.com")
+
+        // Open with Education / Maths search by default
+        loadSearch("maths grade 11 sinhala")
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else finish()
+    // ── Search ───────────────────────────────────────────────────────────────
+    private fun performSearch() {
+        val q = searchBar.text.toString().trim()
+        if (q.isEmpty()) return
+        hideKeyboard()
+
+        val lower = q.lowercase(Locale.ROOT)
+        if (studyTerms.none { lower.contains(it) }) {
+            Toast.makeText(this, "📚 Study topics only! (maths, science, sinhala...)", Toast.LENGTH_SHORT).show()
+            return
+        }
+        loadSearch(q)
     }
 
+    private fun loadSearch(query: String) {
+        val url = "https://m.youtube.com/results?search_query=${Uri.encode(query)}"
+        webView.loadUrl(url)
+        searchBar.setText(query)
+    }
+
+    private fun hideKeyboard() {
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(searchBar.windowToken, 0)
+    }
+
+    // ── URL filter ───────────────────────────────────────────────────────────
     private fun filterUrl(raw: String): Boolean {
         val uri  = Uri.parse(raw)
         val host = (uri.host ?: "").lowercase(Locale.ROOT)
         if (host !in allowedHosts) return true
-        if (host.endsWith("google.com")) return false   // let auth through
+        if (host.endsWith("google.com")) return false
+
         val path = uri.path.orEmpty()
 
         // Block Shorts
@@ -72,43 +173,52 @@ class StudyWebViewActivity : AppCompatActivity() {
             Toast.makeText(this, "Shorts blocked 🚫", Toast.LENGTH_SHORT).show()
             return true
         }
+
         // Block non-study searches
-        if (path == "/results" || uri.getQueryParameter("search_query") != null) {
+        if (uri.getQueryParameter("search_query") != null) {
             val q = uri.getQueryParameter("search_query").orEmpty().lowercase(Locale.ROOT)
             if (studyTerms.none { q.contains(it) }) {
-                Toast.makeText(this, "Study searches only 📚", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "📚 Study searches only!", Toast.LENGTH_SHORT).show()
                 return true
             }
         }
+
         return false
     }
 
+    // ── Inject CSS to hide non-study elements ────────────────────────────────
     private fun injectFocusStyles(view: WebView) {
         val js = """
             (function() {
-              const css = `
-                ytm-browse[page-subtype="home"],
-                ytm-pivot-bar-renderer,
-                ytm-rich-section-renderer,
-                ytm-comments-entry-point-header-renderer,
-                ytm-comment-thread-renderer,
-                ytm-engagement-panel-section-list-renderer,
-                ytm-reel-shelf-renderer,
-                ytm-compact-autoplay-renderer { display:none!important; }
-              `;
-              function apply() {
-                let s = document.getElementById('fl-style');
-                if (!s) { s=document.createElement('style'); s.id='fl-style'; document.head.appendChild(s); }
-                s.textContent = css;
+              var css = [
+                'ytm-browse[page-subtype="home"]',
+                'ytm-pivot-bar-renderer',
+                'ytm-rich-section-renderer',
+                'ytm-reel-shelf-renderer',
+                'ytm-compact-autoplay-renderer',
+                'ytm-comments-entry-point-header-renderer',
+                '#shorts-container',
+                'ytm-reel-item-renderer',
+                '[data-content-type="shorts"]'
+              ].join(',') + '{display:none!important}';
+              function apply(){
+                var s=document.getElementById('fl');
+                if(!s){s=document.createElement('style');s.id='fl';document.head.appendChild(s);}
+                s.textContent=css;
               }
               apply();
-              if (!window.__flObs) {
-                window.__flObs = new MutationObserver(apply);
-                window.__flObs.observe(document.documentElement,{childList:true,subtree:true});
+              if(!window.__fl){
+                window.__fl=new MutationObserver(apply);
+                window.__fl.observe(document.documentElement,{childList:true,subtree:true});
               }
             })();
         """.trimIndent()
         view.evaluateJavascript(js, null)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (webView.canGoBack()) webView.goBack() else finish()
     }
 
     override fun onDestroy() {
