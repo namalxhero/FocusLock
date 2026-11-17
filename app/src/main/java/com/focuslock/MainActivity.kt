@@ -154,27 +154,32 @@ class MainActivity : AppCompatActivity() {
         checkForUpdate()
     }
 
+    private var readyApk: java.io.File? = null
+
     /** Looks for a newer release on GitHub, downloads it, then shows a "tap to install" banner. */
-    private fun checkForUpdate() {
-        if (checkingUpdate) return
+    private fun checkForUpdate(force: Boolean = false) {
+        if (checkingUpdate || readyApk != null) return
         val prefs = getSharedPreferences("focus_update", MODE_PRIVATE)
         val now = System.currentTimeMillis()
-        if (now - prefs.getLong("last_check", 0L) < 20 * 60 * 1000L) return
+        if (!force && now - prefs.getLong("last_check", 0L) < 5 * 60 * 1000L) return
         prefs.edit().putLong("last_check", now).apply()
         checkingUpdate = true
+        updateBanner.visibility = View.VISIBLE
+        updateBanner.text = "🔄 Checking for updates… (v${BuildConfig.VERSION_CODE})"
         Thread {
+            var msg: String? = null
             try {
                 val r = Updater.latest()
-                if (r != null && r.code > BuildConfig.VERSION_CODE) {
-                    runOnUiThread {
-                        updateBanner.text = "⬇️ Downloading update ${r.name}…"
-                        updateBanner.visibility = View.VISIBLE
-                    }
+                if (r == null) {
+                    msg = "⚠️ Update check failed: no release found (v${BuildConfig.VERSION_CODE}) — tap to retry"
+                } else if (r.code > BuildConfig.VERSION_CODE) {
+                    runOnUiThread { updateBanner.text = "⬇️ Downloading update ${r.name}…" }
                     val apk = Updater.download(this, r)
-                    runOnUiThread {
-                        if (apk == null) {
-                            updateBanner.text = "⚠️ Update ${r.name} could not be downloaded or verified"
-                        } else {
+                    if (apk == null) {
+                        msg = "⚠️ Update ${r.name} could not be downloaded or verified — tap to retry"
+                    } else {
+                        readyApk = apk
+                        runOnUiThread {
                             updateBanner.text = "⬆️ Update ${r.name} ready — tap to install"
                             updateBanner.setOnClickListener {
                                 try { Updater.install(this, apk) }
@@ -184,10 +189,18 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                     }
+                } else {
+                    msg = "✅ v${BuildConfig.VERSION_CODE} — up to date (tap to re-check)"
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                msg = "⚠️ Update check failed: ${e.javaClass.simpleName} ${e.message?.take(60) ?: ""} — tap to retry"
             } finally {
                 checkingUpdate = false
+            }
+            val m = msg
+            if (m != null) runOnUiThread {
+                updateBanner.text = m
+                updateBanner.setOnClickListener { checkForUpdate(force = true) }
             }
         }.start()
     }
