@@ -28,6 +28,11 @@ class VideoGate(
     private var token = 0
     private var pendingTitle = ""
 
+    init {
+        VideoJudge.androidPackage = activity.packageName
+        VideoJudge.androidCert = Updater.certSha1(activity)
+    }
+
     private fun videoIdOf(url: String): String? {
         val uri = Uri.parse(url)
         val host = (uri.host ?: "").lowercase(Locale.ROOT)

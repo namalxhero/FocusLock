@@ -26,6 +26,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var currentTime: TextView
     private lateinit var unlockDate: TextView
     private lateinit var adminWarning: TextView
+    private lateinit var updateBanner: TextView
+    private var checkingUpdate = false
     private lateinit var dpm: DevicePolicyManager
     private lateinit var adminComponent: ComponentName
     private val handler = Handler(Looper.getMainLooper())
@@ -52,6 +54,7 @@ class MainActivity : AppCompatActivity() {
         currentTime   = findViewById(R.id.currentTime)
         unlockDate    = findViewById(R.id.unlockDate)
         adminWarning  = findViewById(R.id.adminWarning)
+        updateBanner  = findViewById(R.id.updateBanner)
         dpm           = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
         adminComponent = ComponentName(this, FocusDeviceAdminReceiver::class.java)
 
@@ -148,6 +151,45 @@ class MainActivity : AppCompatActivity() {
         // Check admin status every resume
         adminWarning.visibility =
             if (dpm.isAdminActive(adminComponent)) View.GONE else View.VISIBLE
+        checkForUpdate()
+    }
+
+    /** Looks for a newer release on GitHub, downloads it, then shows a "tap to install" banner. */
+    private fun checkForUpdate() {
+        if (checkingUpdate) return
+        val prefs = getSharedPreferences("focus_update", MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        if (now - prefs.getLong("last_check", 0L) < 20 * 60 * 1000L) return
+        prefs.edit().putLong("last_check", now).apply()
+        checkingUpdate = true
+        Thread {
+            try {
+                val r = Updater.latest()
+                if (r != null && r.code > BuildConfig.VERSION_CODE) {
+                    runOnUiThread {
+                        updateBanner.text = "⬇️ Downloading update ${r.name}…"
+                        updateBanner.visibility = View.VISIBLE
+                    }
+                    val apk = Updater.download(this, r)
+                    runOnUiThread {
+                        if (apk == null) {
+                            updateBanner.text = "⚠️ Update ${r.name} could not be downloaded or verified"
+                        } else {
+                            updateBanner.text = "⬆️ Update ${r.name} ready — tap to install"
+                            updateBanner.setOnClickListener {
+                                try { Updater.install(this, apk) }
+                                catch (e: Exception) {
+                                    Toast.makeText(this, "Install failed: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                checkingUpdate = false
+            }
+        }.start()
     }
 
     override fun onPause() {

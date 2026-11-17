@@ -9,6 +9,10 @@ import java.util.Locale
 
 /** Blocking calls - always run on a background thread. */
 object VideoJudge {
+    /** Set by VideoGate: lets the Google API key be restricted to this exact signed app. */
+    @Volatile var androidPackage = ""
+    @Volatile var androidCert = ""
+
     data class Verdict(val study: Boolean, val reason: String, val aiNote: String = "")
 
     private val hardBlock = listOf(
@@ -145,6 +149,10 @@ IMPORTANT RULES:
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", "application/json")
         conn.setRequestProperty("x-goog-api-key", BuildConfig.GEMINI_API_KEY)
+        if (androidPackage.isNotBlank() && androidCert.isNotBlank()) {
+            conn.setRequestProperty("X-Android-Package", androidPackage)
+            conn.setRequestProperty("X-Android-Cert", androidCert)
+        }
         conn.outputStream.use { it.write(body.toString().toByteArray()) }
         if (conn.responseCode != 200) {
             val err = try {

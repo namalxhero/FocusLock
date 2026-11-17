@@ -153,6 +153,8 @@ class KioskGuardService : Service() {
         if (cls.startsWith(".")) cls = pkg + cls
 
         if (pkg in allowed) return
+        // Package installer / "install unknown apps" screen, only while an update is in progress
+        if (pkg in Updater.installerPackages && Updater.windowOpen(this)) return
         // Any OEM clock/alarm app (package name contains "clock")
         if (pkg.contains("clock", ignoreCase = true)) return
         // Let the Device Admin activation dialog (lives inside Settings) open
