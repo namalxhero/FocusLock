@@ -3,7 +3,7 @@ package com.focuslock
 import android.content.Context
 
 /**
- * 25-day lock. The unlock moment is an absolute date baked into the app, and "now" comes from
+ * 30-day lock. The unlock moment is an absolute date baked into the app, and "now" comes from
  * [TrustedClock] (not the phone's date/time setting), so changing the date, going offline,
  * updating, clearing app data or reinstalling can never shorten, restart or extend the lock.
  */
@@ -36,15 +36,15 @@ class TimeLockManager(context: Context) {
         prefs.edit().putBoolean(KEY_NOTIFIED, true).commit()
     }
 
-    /** Called only after the 25 days expire naturally */
+    /** Called only after the 30 days expire naturally */
     fun unlock() {
         prefs.edit().putBoolean(KEY_COMPLETED, true).commit()
     }
 
     companion object {
-        const val FOCUS_PERIOD_MS = 25L * 24 * 60 * 60 * 1000
-        // 11 Dec 2026, 18:50 Sri Lanka time
-        const val FIXED_DEADLINE_MS = 1796995200000L
+        const val FOCUS_PERIOD_MS = 30L * 24 * 60 * 60 * 1000
+        // 17 Dec 2026, 15:00 (3:00 PM) Sri Lanka time
+        const val FIXED_DEADLINE_MS = 1797499800000L
         private const val KEY_STARTED   = "started_at"
         private const val KEY_NOTIFIED  = "notified"
         private const val KEY_COMPLETED = "completed"

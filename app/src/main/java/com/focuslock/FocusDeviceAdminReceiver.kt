@@ -11,10 +11,10 @@ class FocusDeviceAdminReceiver : DeviceAdminReceiver() {
     }
 
     override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
-        return "Focus Lock is active. You cannot remove Device Admin during the 25-day period."
+        return "Focus Lock is active. You cannot remove Device Admin during the 30-day period."
     }
 
     override fun onDisabled(context: Context, intent: Intent) {
-        // Only reaches here after 25 days (auto-revoke) or force via root
+        // Only reaches here after 30 days (auto-revoke) or force via root
     }
 }

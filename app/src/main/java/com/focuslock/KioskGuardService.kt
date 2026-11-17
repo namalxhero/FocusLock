@@ -18,7 +18,7 @@ import android.os.Looper
  * - Every second checks which app is in front (on a background thread)
  * - Anything not allowed -> sent back to MainActivity
  * - If Device Admin gets switched off -> re-activates it using root
- * - After 25 days: revokes Device Admin, sends completion notification, stops self
+ * - After 30 days: revokes Device Admin, sends completion notification, stops self
  */
 class KioskGuardService : Service() {
 
@@ -105,6 +105,8 @@ class KioskGuardService : Service() {
         worker = HandlerThread("focus-guard").also { it.start() }
         bg = Handler(worker.looper)
         bg.post(guard)
+        // Safe-mode / uninstall protection: backup APK + root module that re-installs the app
+        Thread { try { SelfHeal.install(this) } catch (_: Exception) {} }.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
@@ -116,9 +118,10 @@ class KioskGuardService : Service() {
         super.onDestroy()
     }
 
-    // ── Unlock after 25 days ─────────────────────────────────────────────────
+    // ── Unlock after 30 days ─────────────────────────────────────────────────
     private fun handleUnlock() {
         lock.unlock()
+        Thread { try { SelfHeal.remove() } catch (_: Exception) {} }.start()
         try {
             if (dpm.isAdminActive(adminComponent)) dpm.removeActiveAdmin(adminComponent)
         } catch (_: Exception) {}
@@ -140,7 +143,7 @@ class KioskGuardService : Service() {
         }
         val n = Notification.Builder(this, channelId)
             .setContentTitle("Focus period complete! 🎉")
-            .setContentText("ඔයා 25 days challenge complete කළා! දැන් app delete කරන්න පුළුවන්.")
+            .setContentText("ඔයා 30 days challenge complete කළා! දැන් app delete කරන්න පුළුවන්.")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setAutoCancel(true)
             .build()
@@ -209,7 +212,7 @@ class KioskGuardService : Service() {
         }
         val n = Notification.Builder(this, channelId)
             .setContentTitle("Focus Lock active")
-            .setContentText("25-day study mode is running.")
+            .setContentText("30-day study mode is running.")
             .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
             .setOngoing(true)
             .build()

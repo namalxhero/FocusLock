@@ -214,7 +214,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
             putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
             putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                "Focus Lock needs Device Admin to prevent uninstall during your 25-day challenge.")
+                "Focus Lock needs Device Admin to prevent uninstall during your 30-day challenge.")
         }
         startActivity(intent)
     }
@@ -226,7 +226,7 @@ class MainActivity : AppCompatActivity() {
         val remaining = lock.remainingMs()
         if (remaining <= 0L) {
             countdown.text = "00d 00h 00m 00s"
-            status.text    = "🎉 25-day focus period completed! Well done."
+            status.text    = "🎉 30-day focus period completed! Well done."
             return
         }
         val d = TimeUnit.MILLISECONDS.toDays(remaining)
@@ -234,6 +234,6 @@ class MainActivity : AppCompatActivity() {
         val m = TimeUnit.MILLISECONDS.toMinutes(remaining) % 60
         val s = TimeUnit.MILLISECONDS.toSeconds(remaining) % 60
         countdown.text = String.format("%02dd %02dh %02dm %02ds", d, h, m, s)
-        status.text    = "Focus mode active — O/L 25 day challenge 💪"
+        status.text    = "Focus mode active — O/L 30 day challenge 💪"
     }
 }

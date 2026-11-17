@@ -63,8 +63,8 @@ class VideoGate(
         overlay.visibility = View.VISIBLE
         pause()
         handler.postDelayed({ collect(id, my, 0) }, 300L)
-        // Safety net: never leave the screen covered for more than ~14s
-        handler.postDelayed({ watchdog(id, my) }, 14000L)
+        // Safety net: never leave the screen covered for more than ~24s
+        handler.postDelayed({ watchdog(id, my) }, 24000L)
     }
 
     /** Called every ~0.6s: keep the video paused while the check is running. */
@@ -117,7 +117,7 @@ class VideoGate(
                 }
             } catch (_: Exception) {}
 
-            if (title.isBlank() && desc.isBlank() && attempt < 6) {
+            if (title.isBlank() && desc.isBlank() && attempt < 10) {
                 handler.postDelayed({ collect(id, my, attempt + 1) }, 400L)
                 return@evaluateJavascript
             }
