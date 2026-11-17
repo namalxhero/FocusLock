@@ -6,6 +6,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** Blocking calls - always run on a background thread. */
 object VideoJudge {
@@ -34,26 +37,33 @@ object VideoJudge {
             return Verdict(false, "entertainment keyword")
         }
 
-        // 2) Gemini (tries the configured model, then fallbacks)
+        // 2) Gemini: race the configured model against a fast fallback; first good answer wins
         var aiNote = ""
         if (BuildConfig.GEMINI_API_KEY.isBlank()) {
             aiNote = "no API key in build"
         } else {
-            val started = System.currentTimeMillis()
             val models = listOf(BuildConfig.GEMINI_MODEL, "gemini-3.5-flash-lite").distinct()
-            for (m in models) {
-                if (System.currentTimeMillis() - started > 9000L) break
-                try {
-                    return askGeminiFast(m, title, channel, jsDesc)
-                } catch (e: HttpFailure) {
-                    aiNote += "$m HTTP ${e.code} ${e.msg}; "
-                    // bad key / bad request -> no point trying another model
-                    // only a bad key is worth stopping for; a 400 about the model/config -> try the next model
-                    if (e.code == 401 || e.code == 403 ||
-                        (e.code == 400 && e.msg.contains("API key", ignoreCase = true))) break
-                } catch (e: Exception) {
-                    aiNote += "$m ${e.message?.take(80) ?: e.javaClass.simpleName}; "
+            val notes = java.util.concurrent.CopyOnWriteArrayList<String>()
+            val pool = Executors.newFixedThreadPool(models.size)
+            try {
+                val tasks = models.map { m ->
+                    Callable<Verdict> {
+                        try {
+                            askGeminiFast(m, title, channel, jsDesc)
+                        } catch (e: HttpFailure) {
+                            notes.add("$m HTTP ${e.code} ${e.msg}")
+                            throw e
+                        } catch (e: Exception) {
+                            notes.add("$m ${e.message?.take(80) ?: e.javaClass.simpleName}")
+                            throw e
+                        }
+                    }
                 }
+                return pool.invokeAny(tasks, 11L, TimeUnit.SECONDS)
+            } catch (e: Exception) {
+                aiNote = if (notes.isEmpty()) "timeout" else notes.joinToString("; ")
+            } finally {
+                pool.shutdownNow()
             }
         }
 
