@@ -60,6 +60,9 @@ class StudyWebViewActivity : AppCompatActivity() {
 
     private fun isStudyQuery(q: String) = StudyFilter.isStudyQuery(q)
 
+    // YouTube search filter "Type: Video" -> no playlists, channels or mixes
+    private val videoOnlyFilter = "EgIQAQ=="
+
     /** Returns a message if this URL must be blocked, otherwise null. */
     private fun blockReason(raw: String): String? {
         val uri = Uri.parse(raw)
@@ -84,6 +87,22 @@ class StudyWebViewActivity : AppCompatActivity() {
         if (url.isNullOrEmpty() || url.startsWith("about:") || url.startsWith("data:")) return
         val reason = blockReason(url)
         if (reason == null) {
+            val uri = Uri.parse(url)
+            val q = uri.getQueryParameter("search_query")
+            if (uri.path.orEmpty().startsWith("/results") && !q.isNullOrBlank()) {
+                val sp = Uri.decode(uri.getQueryParameter("sp").orEmpty())
+                if (sp != videoOnlyFilter) {
+                    // Results page without the "Video" filter -> reload videos only
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastRedirectAt >= 1500L) {
+                        lastRedirectAt = now
+                        webView.stopLoading()
+                        loadSearch(q)
+                    }
+                    return
+                }
+                lastSearch = q
+            }
             videoGate.onUrl(url)
             return
         }
@@ -245,7 +264,8 @@ class StudyWebViewActivity : AppCompatActivity() {
 
     private fun loadSearch(query: String) {
         lastSearch = query
-        val url = "https://m.youtube.com/results?search_query=${Uri.encode(query)}"
+        val url = "https://m.youtube.com/results?search_query=${Uri.encode(query)}" +
+            "&sp=${Uri.encode(videoOnlyFilter)}"
         webView.loadUrl(url)
         searchBar.setText(query)
     }
