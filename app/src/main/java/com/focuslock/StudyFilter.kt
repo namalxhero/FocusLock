@@ -8,7 +8,9 @@ object StudyFilter {
         "past paper", "science", "history", "maths", "math", "sinhala", "grade 11",
         "grade 10", "grade11", "o/l", "a/l", "algebra", "geometry", "trigonometry",
         "biology", "chemistry", "physics", "geography", "english", "civics",
-        "buddhism", "ict", "commerce", "education", "ol", "tamil", "health"
+        "buddhism", "ict", "commerce", "education", "ol", "tamil", "health",
+        "model paper", "marking scheme", "important questions",
+        "ගණිත", "විද්‍යා", "ඉතිහාස", "සිංහල", "විභාග"
     )
 
     // Generic words. These alone are NOT enough ("game tutorial" must not pass).

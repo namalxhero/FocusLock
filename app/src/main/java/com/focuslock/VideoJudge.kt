@@ -34,7 +34,8 @@ object VideoJudge {
             if (channel.isBlank()) channel = it.channel
             if (desc.isBlank()) desc = it.desc
         }
-        if (title.isBlank()) return Verdict(false, "title unavailable")
+        if (title.isBlank() && desc.isBlank()) return Verdict(false, "title unavailable")
+        if (title.isBlank()) title = desc.take(120) // description as title fallback
 
         // 1) obvious entertainment keywords with no study words in the title
         val low = (title + " " + channel).lowercase(Locale.ROOT)
@@ -115,8 +116,11 @@ object VideoJudge {
             .replace("&lt;", "<").replace("&gt;", ">").trim()
     }
 
-    private fun watchPage(id: String): Meta? = try {
-        val conn = URL("https://m.youtube.com/watch?v=$id&hl=en")
+    private fun watchPage(id: String): Meta? =
+        watchPageLang(id, "en")?.takeIf { it.title.isNotBlank() } ?: watchPageLang(id, "si")
+
+    private fun watchPageLang(id: String, lang: String): Meta? = try {
+        val conn = URL("https://m.youtube.com/watch?v=$id&hl=$lang")
             .openConnection() as HttpURLConnection
         conn.connectTimeout = 3500
         conn.readTimeout = 4500
