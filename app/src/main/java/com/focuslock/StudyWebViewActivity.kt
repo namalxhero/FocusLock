@@ -1,6 +1,7 @@
 package com.focuslock
 
 import android.annotation.SuppressLint
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -8,19 +9,24 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.WindowInsetsCompat
 import java.util.Locale
 
@@ -204,6 +210,17 @@ class StudyWebViewActivity : AppCompatActivity() {
             setSupportMultipleWindows(false)
         }
 
+        // YouTube's fullscreen button: show the video full screen (landscape) and back
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowCustomView(view: View, callback: WebChromeClient.CustomViewCallback) {
+                enterFullscreen(view, callback)
+            }
+
+            override fun onHideCustomView() {
+                exitFullscreen()
+            }
+        }
+
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
                 view: WebView, request: WebResourceRequest
@@ -347,12 +364,60 @@ class StudyWebViewActivity : AppCompatActivity() {
         view.evaluateJavascript(js, null)
     }
 
+    // ── Fullscreen video ─────────────────────────────────────────────────────
+    private var customView: View? = null
+    private var customCallback: WebChromeClient.CustomViewCallback? = null
+
+    private fun setImmersive(on: Boolean) {
+        val c = WindowCompat.getInsetsController(window, window.decorView) ?: return
+        if (on) {
+            c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            c.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            c.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    private fun enterFullscreen(view: View, cb: WebChromeClient.CustomViewCallback) {
+        if (customView != null) {
+            cb.onCustomViewHidden()
+            return
+        }
+        customView = view
+        customCallback = cb
+        view.setBackgroundColor(0xFF000000.toInt())
+        (window.decorView as ViewGroup).addView(
+            view,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        setImmersive(true)
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    }
+
+    private fun exitFullscreen() {
+        val v = customView ?: return
+        (v.parent as? ViewGroup)?.removeView(v)
+        customView = null
+        customCallback?.onCustomViewHidden()
+        customCallback = null
+        setImmersive(false)
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
+
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else finish()
+        when {
+            customView != null -> exitFullscreen()
+            webView.canGoBack() -> webView.goBack()
+            else -> finish()
+        }
     }
 
     override fun onDestroy() {
+        exitFullscreen()
         feedToken++
         feedExecutor.shutdownNow()
         handler.removeCallbacks(urlWatcher)

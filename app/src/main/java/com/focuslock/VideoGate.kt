@@ -96,11 +96,22 @@ class VideoGate(
                 title=meta('og:title');
                 desc=meta('og:description');
               }
+              // m.youtube.com navigates without reloading, so the meta tags above can be stale.
+              // The on-screen watch-page elements are live: read the title / channel / description from them.
+              function txt(sel){var e=document.querySelector(sel);return e&&e.textContent?e.textContent.trim():'';}
+              var here=(location.search||'').indexOf(id)>=0;
+              if(here){
+                if(!title)title=txt('.slim-video-information-title,ytm-slim-video-information-renderer h2,ytm-slim-video-metadata-section-renderer h2,h1.slim-video-metadata-title');
+                if(!channel)channel=txt('.slim-owner-channel-name,ytm-slim-owner-renderer .yt-core-attributed-string,ytm-slim-owner-renderer a');
+                if(!desc)desc=txt('ytm-expandable-video-description-body-renderer,.expandable-video-description-body-main');
+                // last resort once the page has had time to load: the tab title
+                if(!title&&__LATE__)title=(document.title||'').replace(/\s*-\s*YouTube\s*$/i,'').trim();
+              }
               var v=document.querySelectorAll('video');
               for(var i=0;i<v.length;i++){try{v[i].pause();}catch(e){}}
               return JSON.stringify({title:title.trim(),desc:desc.trim().slice(0,1200),channel:channel.trim()});
             })()
-        """.trimIndent().replace("__ID__", id)
+        """.trimIndent().replace("__ID__", id).replace("__LATE__", if (attempt >= 5) "true" else "false")
 
         webView.evaluateJavascript(js) { raw ->
             if (my != token) return@evaluateJavascript
