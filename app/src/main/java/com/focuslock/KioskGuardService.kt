@@ -3,23 +3,28 @@ package com.focuslock
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.Service
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
-import android.app.Service
 
 /**
- * Foreground service:
- * - Watches foreground app every 1.5s
+ * Foreground service (root needed for enforcement):
+ * - Every second checks which app is in front (on a background thread)
+ * - Anything not allowed -> sent back to MainActivity
+ * - If Device Admin gets switched off -> re-activates it using root
  * - After 25 days: revokes Device Admin, sends completion notification, stops self
  */
 class KioskGuardService : Service() {
 
-    private val handler = Handler(Looper.getMainLooper())
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private lateinit var worker: HandlerThread
+    private lateinit var bg: Handler
     private lateinit var lock: TimeLockManager
     private lateinit var dpm: DevicePolicyManager
     private lateinit var adminComponent: ComponentName
@@ -28,25 +33,45 @@ class KioskGuardService : Service() {
         "com.focuslock",
         "com.google.android.youtube",
         "com.whatsapp",
+        // dialer + call screens
         "com.samsung.android.dialer",
         "com.android.dialer",
         "com.google.android.dialer",
+        "com.samsung.android.incallui",
+        "com.android.incallui",
+        "com.android.phone",
+        "com.android.server.telecom",
+        "com.samsung.android.app.telephonyui",
+        "com.android.emergency",
+        // clock / alarms
+        "com.sec.android.app.clockpackage",
         "com.samsung.android.app.clockpackage",
         "com.android.deskclock",
         "com.google.android.deskclock",
+        "com.coloros.alarmclock",
+        "com.oplus.alarmclock",
+        "com.oneplus.deskclock",
+        "com.android.BBKClock",
+        "com.vivo.alarmclock",
+        "com.motorola.blur.alarmclock",
+        "com.asus.deskclock",
+        "com.lge.clock",
+        "com.huawei.deskclock",
+        // system
         "com.android.systemui",
+        "com.google.android.permissioncontroller",
+        "com.android.permissioncontroller",
         "android"
     )
 
     private val guard = object : Runnable {
         override fun run() {
             if (!lock.isActive()) {
-                // 25 days done!
-                handleUnlock()
+                mainHandler.post { handleUnlock() }
                 return
             }
-            enforceForeground()
-            handler.postDelayed(this, 1500L)
+            try { enforce() } catch (_: Exception) {}
+            bg.postDelayed(this, 1000L)
         }
     }
 
@@ -56,93 +81,109 @@ class KioskGuardService : Service() {
         dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
         adminComponent = ComponentName(this, FocusDeviceAdminReceiver::class.java)
         startForegroundNotification()
-        handler.post(guard)
+        worker = HandlerThread("focus-guard").also { it.start() }
+        bg = Handler(worker.looper)
+        bg.post(guard)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        handler.removeCallbacks(guard)
+        bg.removeCallbacksAndMessages(null)
+        worker.quitSafely()
         super.onDestroy()
     }
 
     // ── Unlock after 25 days ─────────────────────────────────────────────────
     private fun handleUnlock() {
         lock.unlock()
-
-        // Revoke Device Admin so app can be deleted
         try {
-            if (dpm.isAdminActive(adminComponent)) {
-                dpm.removeActiveAdmin(adminComponent)
-            }
+            if (dpm.isAdminActive(adminComponent)) dpm.removeActiveAdmin(adminComponent)
         } catch (_: Exception) {}
 
-        // Send "Focus period complete!" notification (only once)
         if (!lock.isNotified()) {
             sendCompletionNotification()
             lock.markNotified()
         }
-
         stopSelf()
     }
 
-    // ── Completion notification ───────────────────────────────────────────────
     private fun sendCompletionNotification() {
         val channelId = "focuslock_complete"
         val nm = getSystemService(NotificationManager::class.java)
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(
-                channelId,
-                "Focus Complete",
-                NotificationManager.IMPORTANCE_HIGH
+            nm.createNotificationChannel(
+                NotificationChannel(channelId, "Focus Complete", NotificationManager.IMPORTANCE_HIGH)
             )
-            nm.createNotificationChannel(ch)
         }
-
         val n = Notification.Builder(this, channelId)
             .setContentTitle("Focus period complete! 🎉")
             .setContentText("ඔයා 25 days challenge complete කළා! දැන් app delete කරන්න පුළුවන්.")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setAutoCancel(true)
             .build()
-
         nm.notify(2, n)
     }
 
-    // ── Root shell: enforce foreground ───────────────────────────────────────
-    private fun enforceForeground() {
-        try {
-            val proc = Runtime.getRuntime()
-                .exec(arrayOf("su", "-c",
-                    "dumpsys activity activities | grep mResumedActivity | head -1"))
-            val out = proc.inputStream.bufferedReader().readText()
-            proc.waitFor()
-            val pkg = Regex("""(\S+)/\.""").find(out)?.groupValues?.get(1) ?: return
-            if (pkg !in allowed) bringBack()
-        } catch (_: Exception) {}
+    // ── Root helpers ─────────────────────────────────────────────────────────
+    private fun runRoot(cmd: String): String? = try {
+        val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
+        val out = p.inputStream.bufferedReader().readText()
+        p.waitFor()
+        out
+    } catch (_: Exception) { null }
+
+    private val componentRegex = Regex("""u\d+\s+([\w.]+)/([\w.$]+)""")
+
+    private fun enforce() {
+        // 1. Keep Device Admin switched on
+        if (!dpm.isAdminActive(adminComponent)) {
+            runRoot("dpm set-active-admin --user 0 com.focuslock/com.focuslock.FocusDeviceAdminReceiver")
+        }
+
+        // 2. Which app is in front?
+        val out = runRoot(
+            "dumpsys window | grep mCurrentFocus; " +
+            "dumpsys activity activities | grep -E 'topResumedActivity|mResumedActivity'"
+        ) ?: return
+        val m = componentRegex.find(out) ?: return
+        val pkg = m.groupValues[1]
+        var cls = m.groupValues[2]
+        if (cls.startsWith(".")) cls = pkg + cls
+
+        if (pkg in allowed) return
+        // Package installer / "install unknown apps" screen, only while an update is in progress
+        if (pkg in Updater.installerPackages && Updater.windowOpen(this)) return
+        // Any OEM clock/alarm app (package name contains "clock")
+        if (pkg.contains("clock", ignoreCase = true)) return
+        // Let the Device Admin activation dialog (lives inside Settings) open
+        if (cls.endsWith("DeviceAdminAdd")) return
+
+        bringBack()
     }
 
     private fun bringBack() {
-        val i = Intent(this, MainActivity::class.java).apply {
-            addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                Intent.FLAG_ACTIVITY_SINGLE_TOP
-            )
+        val r = runRoot("am start -n com.focuslock/com.focuslock.MainActivity --activity-clear-top")
+        if (r == null) {
+            try {
+                startActivity(
+                    Intent(this, MainActivity::class.java).addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    )
+                )
+            } catch (_: Exception) {}
         }
-        startActivity(i)
     }
 
     // ── Persistent guard notification ────────────────────────────────────────
     private fun startForegroundNotification() {
         val channelId = "focuslock_guard"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(
-                channelId, "Focus Guard",
-                NotificationManager.IMPORTANCE_MIN
-            ).apply { setShowBadge(false) }
+            val ch = NotificationChannel(channelId, "Focus Guard", NotificationManager.IMPORTANCE_MIN)
+                .apply { setShowBadge(false) }
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
         val n = Notification.Builder(this, channelId)

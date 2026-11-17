@@ -26,6 +26,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var currentTime: TextView
     private lateinit var unlockDate: TextView
     private lateinit var adminWarning: TextView
+    private lateinit var updateBanner: TextView
+    private var checkingUpdate = false
     private lateinit var dpm: DevicePolicyManager
     private lateinit var adminComponent: ComponentName
     private val handler = Handler(Looper.getMainLooper())
@@ -52,6 +54,7 @@ class MainActivity : AppCompatActivity() {
         currentTime   = findViewById(R.id.currentTime)
         unlockDate    = findViewById(R.id.unlockDate)
         adminWarning  = findViewById(R.id.adminWarning)
+        updateBanner  = findViewById(R.id.updateBanner)
         dpm           = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
         adminComponent = ComponentName(this, FocusDeviceAdminReceiver::class.java)
 
@@ -85,11 +88,57 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:")))
         }
         findViewById<Button>(R.id.alarmsButton).setOnClickListener {
-            try { startActivity(Intent(AlarmClock.ACTION_SHOW_ALARMS)) }
-            catch (_: Exception) {
+            if (!openClockApp()) {
                 Toast.makeText(this, "Clock app unavailable", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    /** Known clock/alarm app package names across OEMs (Xiaomi, Samsung, Google, Oppo, OnePlus, Vivo...). */
+    private val clockPackages = listOf(
+        "com.android.deskclock",
+        "com.google.android.deskclock",
+        "com.sec.android.app.clockpackage",
+        "com.samsung.android.app.clockpackage",
+        "com.coloros.alarmclock",
+        "com.oplus.alarmclock",
+        "com.oneplus.deskclock",
+        "com.android.BBKClock",
+        "com.vivo.alarmclock",
+        "com.motorola.blur.alarmclock",
+        "com.asus.deskclock",
+        "com.lge.clock",
+        "com.sonyericsson.organizer",
+        "com.huawei.deskclock"
+    )
+
+    private fun tryStart(intent: Intent): Boolean = try {
+        startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (_: Exception) { false }
+
+    private fun openClockApp(): Boolean {
+        // 1. Standard "show alarms" intent
+        if (tryStart(Intent(AlarmClock.ACTION_SHOW_ALARMS))) return true
+
+        // 2. Launch known clock apps directly
+        for (pkg in clockPackages) {
+            val i = packageManager.getLaunchIntentForPackage(pkg)
+            if (i != null && tryStart(i)) return true
+        }
+
+        // 3. Any installed launcher app whose package name contains "clock"
+        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val match = packageManager.queryIntentActivities(launcher, 0)
+            .firstOrNull { it.activityInfo.packageName.contains("clock", ignoreCase = true) }
+        if (match != null) {
+            val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                .setClassName(match.activityInfo.packageName, match.activityInfo.name)
+            if (tryStart(i)) return true
+        }
+
+        // 4. Last resort: Show timers
+        return tryStart(Intent(AlarmClock.ACTION_SHOW_TIMERS))
     }
 
     @Deprecated("Deprecated in Java")
@@ -102,6 +151,45 @@ class MainActivity : AppCompatActivity() {
         // Check admin status every resume
         adminWarning.visibility =
             if (dpm.isAdminActive(adminComponent)) View.GONE else View.VISIBLE
+        checkForUpdate()
+    }
+
+    /** Looks for a newer release on GitHub, downloads it, then shows a "tap to install" banner. */
+    private fun checkForUpdate() {
+        if (checkingUpdate) return
+        val prefs = getSharedPreferences("focus_update", MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        if (now - prefs.getLong("last_check", 0L) < 20 * 60 * 1000L) return
+        prefs.edit().putLong("last_check", now).apply()
+        checkingUpdate = true
+        Thread {
+            try {
+                val r = Updater.latest()
+                if (r != null && r.code > BuildConfig.VERSION_CODE) {
+                    runOnUiThread {
+                        updateBanner.text = "⬇️ Downloading update ${r.name}…"
+                        updateBanner.visibility = View.VISIBLE
+                    }
+                    val apk = Updater.download(this, r)
+                    runOnUiThread {
+                        if (apk == null) {
+                            updateBanner.text = "⚠️ Update ${r.name} could not be downloaded or verified"
+                        } else {
+                            updateBanner.text = "⬆️ Update ${r.name} ready — tap to install"
+                            updateBanner.setOnClickListener {
+                                try { Updater.install(this, apk) }
+                                catch (e: Exception) {
+                                    Toast.makeText(this, "Install failed: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                checkingUpdate = false
+            }
+        }.start()
     }
 
     override fun onPause() {
