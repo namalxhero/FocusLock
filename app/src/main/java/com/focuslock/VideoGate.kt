@@ -1,5 +1,6 @@
 package com.focuslock
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -122,6 +123,9 @@ class VideoGate(
     private fun apply(id: String, my: Int, v: VideoJudge.Verdict) {
         if (my != token || activity.isFinishing) return
         cache[id] = v.study
+        if (v.aiNote.isNotEmpty()) {
+            Toast.makeText(activity, "⚠️ AI check ක්‍රියා කළේ නැහැ (${v.aiNote})", Toast.LENGTH_LONG).show()
+        }
         if (v.study) {
             overlay.visibility = View.GONE
             webView.evaluateJavascript(
@@ -137,6 +141,14 @@ class VideoGate(
         Toast.makeText(activity, "🚫 Study video එකක් නෙවෙයි ($reason)", Toast.LENGTH_LONG).show()
         webView.stopLoading()
         webView.loadUrl("about:blank")
+        // Back to the Focus Lock home screen
+        try {
+            activity.startActivity(
+                Intent(activity, MainActivity::class.java).addFlags(
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                )
+            )
+        } catch (_: Exception) {}
         activity.finish()
     }
 

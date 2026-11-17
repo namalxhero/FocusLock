@@ -48,6 +48,15 @@ class KioskGuardService : Service() {
         "com.samsung.android.app.clockpackage",
         "com.android.deskclock",
         "com.google.android.deskclock",
+        "com.coloros.alarmclock",
+        "com.oplus.alarmclock",
+        "com.oneplus.deskclock",
+        "com.android.BBKClock",
+        "com.vivo.alarmclock",
+        "com.motorola.blur.alarmclock",
+        "com.asus.deskclock",
+        "com.lge.clock",
+        "com.huawei.deskclock",
         // system
         "com.android.systemui",
         "com.google.android.permissioncontroller",
@@ -144,6 +153,8 @@ class KioskGuardService : Service() {
         if (cls.startsWith(".")) cls = pkg + cls
 
         if (pkg in allowed) return
+        // Any OEM clock/alarm app (package name contains "clock")
+        if (pkg.contains("clock", ignoreCase = true)) return
         // Let the Device Admin activation dialog (lives inside Settings) open
         if (cls.endsWith("DeviceAdminAdd")) return
 

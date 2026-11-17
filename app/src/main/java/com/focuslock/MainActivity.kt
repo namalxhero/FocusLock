@@ -85,11 +85,57 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:")))
         }
         findViewById<Button>(R.id.alarmsButton).setOnClickListener {
-            try { startActivity(Intent(AlarmClock.ACTION_SHOW_ALARMS)) }
-            catch (_: Exception) {
+            if (!openClockApp()) {
                 Toast.makeText(this, "Clock app unavailable", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    /** Known clock/alarm app package names across OEMs (Xiaomi, Samsung, Google, Oppo, OnePlus, Vivo...). */
+    private val clockPackages = listOf(
+        "com.android.deskclock",
+        "com.google.android.deskclock",
+        "com.sec.android.app.clockpackage",
+        "com.samsung.android.app.clockpackage",
+        "com.coloros.alarmclock",
+        "com.oplus.alarmclock",
+        "com.oneplus.deskclock",
+        "com.android.BBKClock",
+        "com.vivo.alarmclock",
+        "com.motorola.blur.alarmclock",
+        "com.asus.deskclock",
+        "com.lge.clock",
+        "com.sonyericsson.organizer",
+        "com.huawei.deskclock"
+    )
+
+    private fun tryStart(intent: Intent): Boolean = try {
+        startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (_: Exception) { false }
+
+    private fun openClockApp(): Boolean {
+        // 1. Standard "show alarms" intent
+        if (tryStart(Intent(AlarmClock.ACTION_SHOW_ALARMS))) return true
+
+        // 2. Launch known clock apps directly
+        for (pkg in clockPackages) {
+            val i = packageManager.getLaunchIntentForPackage(pkg)
+            if (i != null && tryStart(i)) return true
+        }
+
+        // 3. Any installed launcher app whose package name contains "clock"
+        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val match = packageManager.queryIntentActivities(launcher, 0)
+            .firstOrNull { it.activityInfo.packageName.contains("clock", ignoreCase = true) }
+        if (match != null) {
+            val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                .setClassName(match.activityInfo.packageName, match.activityInfo.name)
+            if (tryStart(i)) return true
+        }
+
+        // 4. Last resort: Show timers
+        return tryStart(Intent(AlarmClock.ACTION_SHOW_TIMERS))
     }
 
     @Deprecated("Deprecated in Java")
