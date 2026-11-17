@@ -368,7 +368,7 @@ class StudyWebViewActivity : AppCompatActivity() {
     private var customView: View? = null
     private var customCallback: WebChromeClient.CustomViewCallback? = null
 
-    private fun setImmersive(on: Boolean) {
+    private fun setVideoBars(on: Boolean) {
         val c = WindowCompat.getInsetsController(window, window.decorView) ?: return
         if (on) {
             c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -393,7 +393,7 @@ class StudyWebViewActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         )
-        setImmersive(true)
+        setVideoBars(true)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
     }
 
@@ -403,7 +403,7 @@ class StudyWebViewActivity : AppCompatActivity() {
         customView = null
         customCallback?.onCustomViewHidden()
         customCallback = null
-        setImmersive(false)
+        setVideoBars(false)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     }
 
