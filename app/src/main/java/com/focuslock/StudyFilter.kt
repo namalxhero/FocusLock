@@ -34,6 +34,12 @@ object StudyFilter {
                 .containsMatchIn(lower)
         } else lower.contains(term)
 
+    /** True if the text contains entertainment words (used to drop cards from the result feed). */
+    fun isBlockedText(q: String): Boolean {
+        val lower = q.lowercase(Locale.ROOT)
+        return blockTerms.any { hasTerm(lower, it) }
+    }
+
     fun isStudyQuery(q: String): Boolean {
         val lower = q.lowercase(Locale.ROOT)
         if (blockTerms.any { hasTerm(lower, it) }) return false

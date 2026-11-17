@@ -273,12 +273,30 @@ class StudyWebViewActivity : AppCompatActivity() {
         loadSearch(q)
     }
 
+    private val feedExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private var feedToken = 0
+
+    /** Study-only results shown as YouTube-style cards; falls back to the normal results page. */
     private fun loadSearch(query: String) {
         lastSearch = query
         val url = "https://m.youtube.com/results?search_query=${Uri.encode(query)}" +
             "&sp=${Uri.encode(videoOnlyFilter)}"
-        webView.loadUrl(url)
         searchBar.setText(query)
+        val my = ++feedToken
+        feedExecutor.execute {
+            val cards = try { StudyFeed.fetch(query) } catch (_: Exception) { emptyList() }
+            runOnUiThread {
+                if (isFinishing || my != feedToken) return@runOnUiThread
+                if (cards.isEmpty()) {
+                    webView.loadUrl(url)
+                } else {
+                    webView.loadDataWithBaseURL(
+                        url, StudyFeed.renderHtml(query, cards),
+                        "text/html", "UTF-8", url
+                    )
+                }
+            }
+        }
     }
 
     private fun hideKeyboard() {
@@ -335,6 +353,8 @@ class StudyWebViewActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        feedToken++
+        feedExecutor.shutdownNow()
         handler.removeCallbacks(urlWatcher)
         videoGate.destroy()
         webView.stopLoading()
