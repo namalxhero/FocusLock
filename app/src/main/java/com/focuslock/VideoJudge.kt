@@ -48,9 +48,11 @@ object VideoJudge {
                 } catch (e: HttpFailure) {
                     aiNote += "$m HTTP ${e.code} ${e.msg}; "
                     // bad key / bad request -> no point trying another model
-                    if (e.code == 400 || e.code == 401 || e.code == 403) break
+                    // only a bad key is worth stopping for; a 400 about the model/config -> try the next model
+                    if (e.code == 401 || e.code == 403 ||
+                        (e.code == 400 && e.msg.contains("API key", ignoreCase = true))) break
                 } catch (e: Exception) {
-                    aiNote += "$m ${e.javaClass.simpleName}; "
+                    aiNote += "$m ${e.message?.take(80) ?: e.javaClass.simpleName}; "
                 }
             }
         }
@@ -128,7 +130,7 @@ IMPORTANT RULES:
             ))
             .put("generationConfig", JSONObject().apply {
                 put("temperature", 0)
-                put("maxOutputTokens", 200)
+                put("maxOutputTokens", 1024)
                 put("responseMimeType", "application/json")
                 put("responseSchema", schema)
                 if (fastThinking) {
@@ -173,7 +175,9 @@ IMPORTANT RULES:
         for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text"))
         val text = sb.toString().trim().removePrefix("```json").removePrefix("```")
             .removeSuffix("```").trim()
-        val o = JSONObject(text)
+        val o = try { JSONObject(text) } catch (_: Exception) {
+            throw IllegalStateException("bad AI reply: " + text.take(60))
+        }
         return Verdict(o.getBoolean("study"), o.optString("reason", "AI").take(60))
     }
 }
