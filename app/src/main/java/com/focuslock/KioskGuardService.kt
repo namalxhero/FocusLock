@@ -64,6 +64,25 @@ class KioskGuardService : Service() {
         "android"
     )
 
+    private var loops = 0L
+
+    /** Time keeping: real network time, "automatic date & time" kept ON, checkpoint kept outside app data. */
+    private fun housekeeping() {
+        // network time: every 10 min, or every 30 s until the first successful sync of this boot
+        val period = if (TrustedClock.isVerified()) 600L else 30L
+        if (loops % period == 2L) TrustedClock.syncAsync(this)
+
+        if (loops % 30L == 1L) {
+            // the phone must follow network time; undo a manual switch to "off"
+            val auto = try {
+                android.provider.Settings.Global.getInt(contentResolver, "auto_time", 1)
+            } catch (_: Exception) { 1 }
+            if (auto == 0) runRoot("settings put global auto_time 1")
+            // mirror the clock checkpoint to Settings.Global (survives clear data / reinstall)
+            TrustedClock.mirrorCommand()?.let { runRoot(it) }
+        }
+    }
+
     private val guard = object : Runnable {
         override fun run() {
             if (!lock.isActive()) {
@@ -71,6 +90,8 @@ class KioskGuardService : Service() {
                 return
             }
             try { enforce() } catch (_: Exception) {}
+            loops++
+            try { housekeeping() } catch (_: Exception) {}
             bg.postDelayed(this, 1000L)
         }
     }

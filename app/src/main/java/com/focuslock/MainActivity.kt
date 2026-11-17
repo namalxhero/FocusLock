@@ -221,7 +221,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateUI() {
         // Sri Lanka current time
-        currentTime.text = "🕐 ${timeFmt.format(Date())} (SLT)"
+        currentTime.text = "🕐 ${timeFmt.format(Date(TrustedClock.now(this)))} (SLT${if (TrustedClock.isVerified()) " ✓" else ""})"
 
         val remaining = lock.remainingMs()
         if (remaining <= 0L) {

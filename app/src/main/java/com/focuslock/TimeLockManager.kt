@@ -3,39 +3,32 @@ package com.focuslock
 import android.content.Context
 
 /**
- * Hard 25-day timer backed by SharedPreferences.
- * Device Admin revoke + notification on completion.
+ * 25-day lock. The unlock moment is an absolute date baked into the app, and "now" comes from
+ * [TrustedClock] (not the phone's date/time setting), so changing the date, going offline,
+ * updating, clearing app data or reinstalling can never shorten, restart or extend the lock.
  */
 class TimeLockManager(context: Context) {
-    private val prefs = context.getSharedPreferences("focus_lock", Context.MODE_PRIVATE)
+    private val ctx = context.applicationContext
+    private val prefs = ctx.getSharedPreferences("focus_lock", Context.MODE_PRIVATE)
 
-    fun startIfNeeded(now: Long = System.currentTimeMillis()): Long {
-        val existing = prefs.getLong(KEY_DEADLINE, 0L)
-        if (existing > 0L) return existing
-        // A fresh install (e.g. after the one-time re-sign) keeps the SAME unlock date,
-        // so reinstalling can never restart the 25 days.
-        val deadline = if (FIXED_DEADLINE_MS > now) FIXED_DEADLINE_MS else now + FOCUS_PERIOD_MS
-        prefs.edit()
-            .putLong(KEY_STARTED, now)
-            .putLong(KEY_DEADLINE, deadline)
-            .putBoolean(KEY_ACTIVE, true)
-            .putBoolean(KEY_NOTIFIED, false)
-            .commit()
-        return deadline
+    private fun trustedNow(): Long = TrustedClock.now(ctx)
+
+    fun startIfNeeded(): Long {
+        if (!prefs.contains(KEY_NOTIFIED)) {
+            // First run, or app data was cleared: nothing here can move the unlock date
+            prefs.edit()
+                .putLong(KEY_STARTED, FIXED_DEADLINE_MS - FOCUS_PERIOD_MS)
+                .putBoolean(KEY_NOTIFIED, trustedNow() >= FIXED_DEADLINE_MS)
+                .commit()
+        }
+        return FIXED_DEADLINE_MS
     }
 
-    fun deadline(): Long = prefs.getLong(KEY_DEADLINE, 0L)
+    fun deadline(): Long = FIXED_DEADLINE_MS
 
-    fun isActive(): Boolean {
-        if (!prefs.getBoolean(KEY_ACTIVE, false)) return false
-        return deadline() > System.currentTimeMillis()
-    }
+    fun isActive(): Boolean = trustedNow() < FIXED_DEADLINE_MS
 
-    fun remainingMs(now: Long = System.currentTimeMillis()): Long {
-        val d = deadline()
-        if (d == 0L) return FOCUS_PERIOD_MS
-        return (d - now).coerceAtLeast(0L)
-    }
+    fun remainingMs(at: Long = trustedNow()): Long = (FIXED_DEADLINE_MS - at).coerceAtLeast(0L)
 
     fun isNotified(): Boolean = prefs.getBoolean(KEY_NOTIFIED, false)
 
@@ -43,18 +36,17 @@ class TimeLockManager(context: Context) {
         prefs.edit().putBoolean(KEY_NOTIFIED, true).commit()
     }
 
-    /** Called only after 25 days expire naturally */
+    /** Called only after the 25 days expire naturally */
     fun unlock() {
-        prefs.edit().putBoolean(KEY_ACTIVE, false).commit()
+        prefs.edit().putBoolean(KEY_COMPLETED, true).commit()
     }
 
     companion object {
         const val FOCUS_PERIOD_MS = 25L * 24 * 60 * 60 * 1000
         // 11 Dec 2026, 18:50 Sri Lanka time
         const val FIXED_DEADLINE_MS = 1796995200000L
-        private const val KEY_STARTED  = "started_at"
-        private const val KEY_DEADLINE = "unlock_at"
-        private const val KEY_ACTIVE   = "active"
-        private const val KEY_NOTIFIED = "notified"
+        private const val KEY_STARTED   = "started_at"
+        private const val KEY_NOTIFIED  = "notified"
+        private const val KEY_COMPLETED = "completed"
     }
 }
