@@ -36,17 +36,17 @@ object VideoJudge {
             aiNote = "no API key in build"
         } else {
             val started = System.currentTimeMillis()
-            val models = listOf(BuildConfig.GEMINI_MODEL, "gemini-2.5-flash").distinct()
+            val models = listOf(BuildConfig.GEMINI_MODEL, "gemini-3.5-flash-lite").distinct()
             for (m in models) {
                 if (System.currentTimeMillis() - started > 9000L) break
                 try {
                     return askGeminiFast(m, title, channel, jsDesc)
                 } catch (e: HttpFailure) {
-                    aiNote = "$m HTTP ${e.code}"
+                    aiNote += "$m HTTP ${e.code} ${e.msg}; "
                     // bad key / bad request -> no point trying another model
                     if (e.code == 400 || e.code == 401 || e.code == 403) break
                 } catch (e: Exception) {
-                    aiNote = "$m ${e.javaClass.simpleName}"
+                    aiNote += "$m ${e.javaClass.simpleName}; "
                 }
             }
         }
@@ -56,7 +56,7 @@ object VideoJudge {
         return Verdict(ok, if (ok) "keyword match" else "no study keywords", aiNote)
     }
 
-    private class HttpFailure(val code: Int) : Exception("HTTP $code")
+    private class HttpFailure(val code: Int, val msg: String = "") : Exception("HTTP $code")
 
     private fun oembed(id: String): Pair<String, String>? = try {
         val target = URLEncoder.encode("https://www.youtube.com/watch?v=$id", "UTF-8")
@@ -146,7 +146,13 @@ IMPORTANT RULES:
         conn.setRequestProperty("Content-Type", "application/json")
         conn.setRequestProperty("x-goog-api-key", BuildConfig.GEMINI_API_KEY)
         conn.outputStream.use { it.write(body.toString().toByteArray()) }
-        if (conn.responseCode != 200) throw HttpFailure(conn.responseCode)
+        if (conn.responseCode != 200) {
+            val err = try {
+                JSONObject(conn.errorStream?.bufferedReader()?.readText() ?: "")
+                    .optJSONObject("error")?.optString("message").orEmpty().take(90)
+            } catch (_: Exception) { "" }
+            throw HttpFailure(conn.responseCode, err)
+        }
 
         val resp = JSONObject(conn.inputStream.bufferedReader().readText())
         val cands = resp.optJSONArray("candidates")

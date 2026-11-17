@@ -12,7 +12,7 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         buildConfigField("String", "GEMINI_API_KEY", "\"${System.getenv("GEMINI_API_KEY") ?: ""}\"")
-        buildConfigField("String", "GEMINI_MODEL", "\"${System.getenv("GEMINI_MODEL") ?: "gemini-3.5-flash"}\"")
+        buildConfigField("String", "GEMINI_MODEL", "\"${System.getenv("GEMINI_MODEL") ?: "gemini-3.8-flash"}\"")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
