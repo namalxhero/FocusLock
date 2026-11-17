@@ -19,10 +19,9 @@ object VideoJudge {
     )
 
     fun judgeVideo(id: String, jsTitle: String, jsChannel: String, jsDesc: String): Verdict {
-        var title = ""
-        var channel = ""
-        oembed(id)?.let { title = it.first; channel = it.second }
-        if (title.isBlank()) { title = jsTitle; channel = jsChannel }
+        var title = jsTitle
+        var channel = jsChannel
+        if (title.isBlank()) oembed(id)?.let { title = it.first; channel = it.second }
         if (title.isBlank()) return Verdict(false, "title unavailable")
 
         // 1) obvious entertainment keywords with no study words in the title
@@ -36,14 +35,15 @@ object VideoJudge {
         if (BuildConfig.GEMINI_API_KEY.isBlank()) {
             aiNote = "no API key in build"
         } else {
-            val models = listOf(BuildConfig.GEMINI_MODEL, "gemini-3.8-flash", "gemini-2.5-flash").distinct()
+            val started = System.currentTimeMillis()
+            val models = listOf(BuildConfig.GEMINI_MODEL, "gemini-2.5-flash").distinct()
             for (m in models) {
+                if (System.currentTimeMillis() - started > 9000L) break
                 try {
-                    val r = askGemini(m, title, channel, jsDesc)
-                    return r
+                    return askGeminiFast(m, title, channel, jsDesc)
                 } catch (e: HttpFailure) {
                     aiNote = "$m HTTP ${e.code}"
-                    // wrong model name / quota -> try next model; bad key -> stop
+                    // bad key / bad request -> no point trying another model
                     if (e.code == 400 || e.code == 401 || e.code == 403) break
                 } catch (e: Exception) {
                     aiNote = "$m ${e.javaClass.simpleName}"
@@ -62,8 +62,8 @@ object VideoJudge {
         val target = URLEncoder.encode("https://www.youtube.com/watch?v=$id", "UTF-8")
         val conn = URL("https://www.youtube.com/oembed?url=$target&format=json")
             .openConnection() as HttpURLConnection
-        conn.connectTimeout = 6000
-        conn.readTimeout = 6000
+        conn.connectTimeout = 3000
+        conn.readTimeout = 3000
         if (conn.responseCode != 200) null
         else {
             val o = JSONObject(conn.inputStream.bufferedReader().readText())
@@ -96,7 +96,15 @@ IMPORTANT RULES:
 4. Reply with JSON only, no other text: {"study": true or false, "reason": "short reason in Sinhala, max 8 words"}
 """.trimIndent()
 
-    private fun askGemini(model: String, title: String, channel: String, desc: String): Verdict {
+    private fun askGeminiFast(model: String, title: String, channel: String, desc: String): Verdict =
+        try { askGemini(model, title, channel, desc, true) }
+        catch (e: HttpFailure) {
+            if (e.code == 400) askGemini(model, title, channel, desc, false) else throw e
+        }
+
+    private fun askGemini(
+        model: String, title: String, channel: String, desc: String, fastThinking: Boolean
+    ): Verdict {
         val userText = "<video>\nTitle: " + title + "\nChannel: " + channel +
             "\nDescription: " + desc.take(1200) + "\n</video>"
 
@@ -114,18 +122,26 @@ IMPORTANT RULES:
                 JSONObject().put("role", "user").put("parts",
                     JSONArray().put(JSONObject().put("text", userText)))
             ))
-            .put("generationConfig", JSONObject()
-                .put("temperature", 0)
-                .put("responseMimeType", "application/json")
-                .put("responseSchema", schema))
+            .put("generationConfig", JSONObject().apply {
+                put("temperature", 0)
+                put("maxOutputTokens", 200)
+                put("responseMimeType", "application/json")
+                put("responseSchema", schema)
+                if (fastThinking) {
+                    // Don't let the model "think" for seconds on a yes/no decision
+                    put("thinkingConfig",
+                        if (model.startsWith("gemini-2.5")) JSONObject().put("thinkingBudget", 0)
+                        else JSONObject().put("thinkingLevel", "low"))
+                }
+            })
 
         val conn = URL(
             "https://generativelanguage.googleapis.com/v1beta/models/" +
                 model + ":generateContent"
         ).openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
-        conn.connectTimeout = 8000
-        conn.readTimeout = 20000
+        conn.connectTimeout = 4000
+        conn.readTimeout = 9000
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", "application/json")
         conn.setRequestProperty("x-goog-api-key", BuildConfig.GEMINI_API_KEY)

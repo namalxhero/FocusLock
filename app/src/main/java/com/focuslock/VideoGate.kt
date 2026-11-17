@@ -26,6 +26,7 @@ class VideoGate(
     private val cache = HashMap<String, Boolean>()
     private var currentId: String? = null
     private var token = 0
+    private var pendingTitle = ""
 
     private fun videoIdOf(url: String): String? {
         val uri = Uri.parse(url)
@@ -56,7 +57,9 @@ class VideoGate(
 
         overlay.visibility = View.VISIBLE
         pause()
-        handler.postDelayed({ collect(id, my, 0) }, 1000L)
+        handler.postDelayed({ collect(id, my, 0) }, 300L)
+        // Safety net: never leave the screen covered for more than ~14s
+        handler.postDelayed({ watchdog(id, my) }, 14000L)
     }
 
     /** Called every ~0.6s: keep the video paused while the check is running. */
@@ -109,15 +112,23 @@ class VideoGate(
                 }
             } catch (_: Exception) {}
 
-            if (title.isBlank() && desc.isBlank() && attempt < 3) {
-                handler.postDelayed({ collect(id, my, attempt + 1) }, 800L)
+            if (title.isBlank() && desc.isBlank() && attempt < 6) {
+                handler.postDelayed({ collect(id, my, attempt + 1) }, 400L)
                 return@evaluateJavascript
             }
+            pendingTitle = title
             Thread {
                 val verdict = VideoJudge.judgeVideo(id, title, channel, desc)
                 activity.runOnUiThread { apply(id, my, verdict) }
             }.start()
         }
+    }
+
+    /** The AI took too long: decide from the title with the keyword filter instead. */
+    private fun watchdog(id: String, my: Int) {
+        if (my != token || activity.isFinishing || cache.containsKey(id)) return
+        val ok = StudyFilter.isStudyQuery(pendingTitle)
+        apply(id, my, VideoJudge.Verdict(ok, if (ok) "keyword match" else "check timed out", "timeout"))
     }
 
     private fun apply(id: String, my: Int, v: VideoJudge.Verdict) {
