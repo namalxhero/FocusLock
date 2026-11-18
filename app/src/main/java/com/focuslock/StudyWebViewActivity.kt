@@ -7,11 +7,13 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -26,19 +28,46 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import org.json.JSONObject
+import org.json.JSONTokener
 import java.util.Locale
+import java.util.concurrent.Executors
 
 class StudyWebViewActivity : AppCompatActivity() {
 
-    private lateinit var webView: WebView
+    companion object {
+        /** True while the study screen is in front (the auto-updater waits while this is true). */
+        @Volatile var active = false
+    }
+
+    private enum class Mode { NONE, FULL, MINI }
+
+    private lateinit var webView: WebView        // study results (cards)
+    private lateinit var playerView: WebView     // the video page: full screen or mini player
+    private lateinit var playerFrame: FrameLayout
+    private lateinit var surface: FrameLayout
+    private lateinit var miniControls: FrameLayout
+    private lateinit var miniPlay: TextView
     private lateinit var searchBar: EditText
     private lateinit var videoGate: VideoGate
 
     private val handler = Handler(Looper.getMainLooper())
     private var lastSearch = "maths grade 11 sinhala"
     private var lastRedirectAt = 0L
+
+    private var mode = Mode.NONE
+    private var playerVideoId: String? = null
+    private var lastSurfaceW = 0
+    private var lastSurfaceH = 0
+
+    // Endless lists: results page (feedPager) and the list under the playing video (relatedPager)
+    private var feedPager: StudyFeed.Pager? = null
+    private var relatedPager: StudyFeed.Pager? = null
+    private var relatedToken = 0
+    private var relatedForId: String? = null
+    private var relatedAt = 0L
 
     // ── Keyword chips ────────────────────────────────────────────────────────
     private val chips = listOf(
@@ -64,6 +93,8 @@ class StudyWebViewActivity : AppCompatActivity() {
         "accounts.google.com", "consent.youtube.com"
     )
 
+    private val idRegex = Regex("^[A-Za-z0-9_-]{6,20}$")
+
     private fun isStudyQuery(q: String) = StudyFilter.isStudyQuery(q)
 
     // YouTube search filter "Type: Video" -> no playlists, channels or mixes
@@ -87,13 +118,28 @@ class StudyWebViewActivity : AppCompatActivity() {
         return null
     }
 
-    // YouTube navigates inside the page without a real page load, so we also
-    // check the current URL regularly and push the user back to a study search.
-    private fun enforceUrl(url: String?) {
+    /** The player page may only ever show a watch page (no channels, home, results...). */
+    private fun playerBlockReason(raw: String): String? {
+        val uri = Uri.parse(raw)
+        val host = (uri.host ?: "").lowercase(Locale.ROOT)
+        if (host !in allowedHosts) return "Blocked: $host"
+        if (host == "consent.youtube.com" || host.endsWith("google.com")) return null
+        if (uri.path != "/watch") return "Study videos only 📚"
+        return blockReason(raw)
+    }
+
+    // ── Results page URL watcher ─────────────────────────────────────────────
+    private fun enforceFeedUrl(url: String?) {
         if (url.isNullOrEmpty() || url.startsWith("about:") || url.startsWith("data:")) return
         val reason = blockReason(url)
         if (reason == null) {
             val uri = Uri.parse(url)
+            if (uri.path == "/watch") {
+                // YouTube's own results page opened a video: play it in the player instead
+                openVideo(url)
+                handler.post { if (webView.canGoBack()) webView.goBack() }
+                return
+            }
             val q = uri.getQueryParameter("search_query")
             if (uri.path.orEmpty().startsWith("/results") && !q.isNullOrBlank()) {
                 val sp = Uri.decode(uri.getQueryParameter("sp").orEmpty())
@@ -109,7 +155,6 @@ class StudyWebViewActivity : AppCompatActivity() {
                 }
                 lastSearch = q
             }
-            videoGate.onUrl(url)
             return
         }
         val now = SystemClock.elapsedRealtime()
@@ -120,10 +165,24 @@ class StudyWebViewActivity : AppCompatActivity() {
         loadSearch(lastSearch)
     }
 
+    // ── Player URL watcher ───────────────────────────────────────────────────
+    private fun enforcePlayerUrl(url: String?) {
+        if (url.isNullOrEmpty() || url.startsWith("about:") || url.startsWith("data:")) return
+        val reason = playerBlockReason(url)
+        if (reason != null) {
+            Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
+            closePlayer()
+            return
+        }
+        if (Uri.parse(url).path == "/watch") videoGate.onUrl(url)
+    }
+
     private val urlWatcher = object : Runnable {
         override fun run() {
-            enforceUrl(webView.url)
+            enforceFeedUrl(webView.url)
+            if (mode != Mode.NONE) enforcePlayerUrl(playerView.url)
             videoGate.tick()
+            if (mode == Mode.MINI) updateMiniPlayIcon()
             handler.postDelayed(this, 600L)
         }
     }
@@ -142,20 +201,22 @@ class StudyWebViewActivity : AppCompatActivity() {
             insets
         }
 
-        webView   = findViewById(R.id.studyWebView)
-        searchBar = findViewById(R.id.searchBar)
+        webView      = findViewById(R.id.studyWebView)
+        playerView   = findViewById(R.id.playerWebView)
+        playerFrame  = findViewById(R.id.playerFrame)
+        surface      = findViewById(R.id.surface)
+        miniControls = findViewById(R.id.miniControls)
+        miniPlay     = findViewById(R.id.miniPlay)
+        searchBar    = findViewById(R.id.searchBar)
         webView.setBackgroundColor(0xFF0A0A0F.toInt())
-        videoGate = VideoGate(this, webView, findViewById(R.id.checkOverlay))
+        playerView.setBackgroundColor(0xFF000000.toInt())
+        videoGate = VideoGate(this, playerView, findViewById(R.id.checkOverlay))
 
         // ── Back button ──────────────────────────────────────────────────────
-        findViewById<TextView>(R.id.btnBack).setOnClickListener {
-            if (webView.canGoBack()) webView.goBack() else finish()
-        }
+        findViewById<TextView>(R.id.btnBack).setOnClickListener { handleBack() }
 
         // ── Search button ────────────────────────────────────────────────────
-        findViewById<TextView>(R.id.btnSearch).setOnClickListener {
-            performSearch()
-        }
+        findViewById<TextView>(R.id.btnSearch).setOnClickListener { performSearch() }
 
         // ── Search bar enter key ─────────────────────────────────────────────
         searchBar.setOnEditorActionListener { _, actionId, event ->
@@ -165,6 +226,11 @@ class StudyWebViewActivity : AppCompatActivity() {
                 true
             } else false
         }
+
+        // ── Mini player controls ─────────────────────────────────────────────
+        miniControls.setOnClickListener { expandPlayer() }
+        miniPlay.setOnClickListener { toggleMiniPlay() }
+        findViewById<TextView>(R.id.miniClose).setOnClickListener { closePlayer() }
 
         // ── Build keyword chips (YouTube-style pill filters) ────────────────────
         val container = findViewById<LinearLayout>(R.id.chipContainer)
@@ -201,65 +267,24 @@ class StudyWebViewActivity : AppCompatActivity() {
             if (index == 0) selectChip(chip)   // highlight "Maths" (default search) on open
         }
 
-        // ── WebView setup ────────────────────────────────────────────────────
-        webView.settings.apply {
-            javaScriptEnabled                     = true
-            domStorageEnabled                     = true
-            mediaPlaybackRequiresUserGesture      = true
-            javaScriptCanOpenWindowsAutomatically = false
-            setSupportMultipleWindows(false)
-        }
+        setupWebView(webView, false)
+        setupWebView(playerView, true)
 
-        // YouTube's fullscreen button: show the video full screen (landscape) and back
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onShowCustomView(view: View, callback: WebChromeClient.CustomViewCallback) {
-                enterFullscreen(view, callback)
-            }
-
-            override fun onHideCustomView() {
-                exitFullscreen()
-            }
-        }
-
-        webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(
-                view: WebView, request: WebResourceRequest
-            ): Boolean = filterUrl(request.url.toString())
-
-            @Suppress("DEPRECATION")
-            override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
-                filterUrl(url)
-
-            override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
-                super.doUpdateVisitedHistory(view, url, isReload)
-                enforceUrl(url)
-            }
-
-            override fun onReceivedError(
-                view: WebView, request: WebResourceRequest, error: WebResourceError
-            ) {
-                if (request.isForMainFrame) {
-                    Toast.makeText(
-                        this@StudyWebViewActivity,
-                        "Load error: ${error.description}", Toast.LENGTH_LONG
-                    ).show()
+        // Rotating the phone while the mini player is showing: measure it again
+        surface.addOnLayoutChangeListener { _, l, t, r, b, _, _, _, _ ->
+            val w = r - l
+            val h = b - t
+            if (w != lastSurfaceW || h != lastSurfaceH) {
+                lastSurfaceW = w
+                lastSurfaceH = h
+                if (mode == Mode.MINI) {
+                    handler.postDelayed({
+                        if (mode == Mode.MINI) {
+                            expandPlayer()
+                            minimizePlayer()
+                        }
+                    }, 350L)
                 }
-            }
-
-            override fun onReceivedHttpError(
-                view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse
-            ) {
-                if (request.isForMainFrame) {
-                    Toast.makeText(
-                        this@StudyWebViewActivity,
-                        "HTTP ${errorResponse.statusCode}", Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-
-            override fun onPageFinished(view: WebView, url: String) {
-                super.onPageFinished(view, url)
-                injectFocusStyles(view)
             }
         }
 
@@ -267,12 +292,295 @@ class StudyWebViewActivity : AppCompatActivity() {
         loadSearch(lastSearch)
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupWebView(w: WebView, isPlayer: Boolean) {
+        w.settings.apply {
+            javaScriptEnabled                     = true
+            domStorageEnabled                     = true
+            mediaPlaybackRequiresUserGesture      = true
+            javaScriptCanOpenWindowsAutomatically = false
+            setSupportMultipleWindows(false)
+        }
+        w.addJavascriptInterface(Bridge(isPlayer), "FLBridge")
+        if (isPlayer) {
+            // YouTube's fullscreen button: show the video full screen (landscape) and back
+            w.webChromeClient = object : WebChromeClient() {
+                override fun onShowCustomView(view: View, callback: WebChromeClient.CustomViewCallback) {
+                    enterFullscreen(view, callback)
+                }
+
+                override fun onHideCustomView() {
+                    exitFullscreen()
+                }
+            }
+        }
+        w.webViewClient = client(isPlayer)
+    }
+
+    private fun client(isPlayer: Boolean): WebViewClient = object : WebViewClient() {
+        override fun shouldOverrideUrlLoading(
+            view: WebView, request: WebResourceRequest
+        ): Boolean = handleNav(request.url.toString(), isPlayer)
+
+        @Suppress("DEPRECATION")
+        override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
+            handleNav(url, isPlayer)
+
+        override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
+            super.doUpdateVisitedHistory(view, url, isReload)
+            if (isPlayer) enforcePlayerUrl(url) else enforceFeedUrl(url)
+        }
+
+        override fun onReceivedError(
+            view: WebView, request: WebResourceRequest, error: WebResourceError
+        ) {
+            if (request.isForMainFrame) {
+                Toast.makeText(
+                    this@StudyWebViewActivity,
+                    "Load error: ${error.description}", Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+
+        override fun onReceivedHttpError(
+            view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse
+        ) {
+            if (request.isForMainFrame) {
+                Toast.makeText(
+                    this@StudyWebViewActivity,
+                    "HTTP ${errorResponse.statusCode}", Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+
+        override fun onPageFinished(view: WebView, url: String) {
+            super.onPageFinished(view, url)
+            injectFocusStyles(view)
+            if (isPlayer) injectRelated(url)
+        }
+    }
+
+    /** Link taps / redirects. Returns true when we handled (or blocked) the URL ourselves. */
+    private fun handleNav(raw: String, isPlayer: Boolean): Boolean {
+        if (!isPlayer) {
+            // a card was tapped: play it in the player instead of leaving the results
+            val uri = Uri.parse(raw)
+            if (uri.path == "/watch" && blockReason(raw) == null) {
+                openVideo(raw)
+                return true
+            }
+            val reason = blockReason(raw) ?: return false
+            Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
+            return true
+        }
+        val reason = playerBlockReason(raw) ?: return false
+        Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
+        return true
+    }
+
+    // ── Endless scrolling bridge (called from the pages) ─────────────────────
+    inner class Bridge(private val forPlayer: Boolean) {
+        @JavascriptInterface
+        fun more() {
+            runOnUiThread { loadMore(forPlayer) }
+        }
+    }
+
+    private val moreExecutor = Executors.newSingleThreadExecutor()
+
+    private fun loadMore(forPlayer: Boolean) {
+        val pager = (if (forPlayer) relatedPager else feedPager) ?: return
+        val view = if (forPlayer) playerView else webView
+        if (pager.busy) return
+        if (!pager.hasMore()) {
+            view.evaluateJavascript("window.flDone&&window.flDone()", null)
+            return
+        }
+        pager.busy = true
+        moreExecutor.execute {
+            val cards = try { pager.next() } catch (_: Exception) { emptyList() }
+            runOnUiThread {
+                pager.busy = false
+                if (isFinishing) return@runOnUiThread
+                if (pager !== (if (forPlayer) relatedPager else feedPager)) return@runOnUiThread
+                if (cards.isEmpty()) {
+                    view.evaluateJavascript("window.flDone&&window.flDone()", null)
+                } else {
+                    view.evaluateJavascript(
+                        "window.flAppend&&window.flAppend(" +
+                            StudyFeed.jsString(StudyFeed.cardsHtml(cards)) + ")", null
+                    )
+                }
+            }
+        }
+    }
+
+    // ── Study videos under the playing video ─────────────────────────────────
+    private fun injectRelated(url: String) {
+        val uri = Uri.parse(url)
+        if (uri.path != "/watch" || mode == Mode.NONE) return
+        if (playerBlockReason(url) != null) return
+        val id = uri.getQueryParameter("v") ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (id == relatedForId && now - relatedAt < 4000L) return
+        relatedForId = id
+        relatedAt = now
+        val my = ++relatedToken
+        val base = lastSearch
+        feedExecutor.execute {
+            val cards = try { StudyFeed.fetch(base) } catch (_: Exception) { emptyList() }
+            val list = cards.filter { it.id != id }
+            runOnUiThread {
+                if (isFinishing || my != relatedToken || mode == Mode.NONE) return@runOnUiThread
+                relatedPager = StudyFeed.Pager(base, list.map { it.id } + id, 1)
+                playerView.evaluateJavascript(StudyFeed.injectScript(StudyFeed.cardsHtml(list)), null)
+            }
+        }
+    }
+
+    // ── Player: full screen <-> mini player ──────────────────────────────────
+    private fun openVideo(raw: String) {
+        val uri = Uri.parse(raw)
+        val host = (uri.host ?: "").lowercase(Locale.ROOT)
+        val id = uri.getQueryParameter("v").orEmpty()
+        if (!host.endsWith("youtube.com") || !idRegex.matches(id)) return
+        if (id == playerVideoId && mode != Mode.NONE) {
+            expandPlayer()
+            return
+        }
+        playerVideoId = id
+        relatedForId = null
+        relatedPager = null
+        expandPlayer()
+        playerView.loadUrl("https://m.youtube.com/watch?v=$id")
+    }
+
+    private fun expandPlayer() {
+        mode = Mode.FULL
+        playerFrame.layoutParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        playerView.layoutParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        playerView.scaleX = 1f
+        playerView.scaleY = 1f
+        playerView.translationX = 0f
+        playerView.translationY = 0f
+        miniControls.visibility = View.GONE
+        playerFrame.visibility = View.VISIBLE
+    }
+
+    /** Shrinks the playing video into a small box at the bottom-right; the results show behind it. */
+    private fun minimizePlayer() {
+        if (mode != Mode.FULL || customView != null) return
+        val js = "(function(){window.scrollTo(0,0);var v=document.querySelector('video');" +
+            "if(!v)return '';var r=v.getBoundingClientRect();" +
+            "return JSON.stringify({l:r.left,t:r.top,w:r.width,h:r.height,vw:window.innerWidth});})()"
+        playerView.evaluateJavascript(js) { raw ->
+            var l = 0.0
+            var t = 0.0
+            var w = 0.0
+            var h = 0.0
+            var vw = 0.0
+            try {
+                val s = JSONTokener(raw ?: "").nextValue()
+                if (s is String && s.isNotEmpty()) {
+                    val o = JSONObject(s)
+                    l = o.optDouble("l", 0.0)
+                    t = o.optDouble("t", 0.0)
+                    w = o.optDouble("w", 0.0)
+                    h = o.optDouble("h", 0.0)
+                    vw = o.optDouble("vw", 0.0)
+                }
+            } catch (_: Exception) {}
+            if (mode != Mode.FULL) return@evaluateJavascript
+            if (w <= 0.0 || h <= 0.0 || vw <= 0.0) {
+                closePlayer()          // no video yet (still loading): just close it
+                return@evaluateJavascript
+            }
+            applyMini(l, t, w, h, vw)
+        }
+    }
+
+    private fun applyMini(l: Double, t: Double, w: Double, h: Double, vw: Double) {
+        val d = resources.displayMetrics.density
+        val fw = surface.width
+        val fh = surface.height
+        if (fw <= 0 || fh <= 0) {
+            closePlayer()
+            return
+        }
+        val pxPerCss = fw.toDouble() / vw
+        val miniW = (190 * d).toInt()
+        val miniH = (miniW * (h / w)).toInt().coerceIn((60 * d).toInt(), (160 * d).toInt())
+        val s = miniW / (w * pxPerCss)
+
+        // The page keeps its full size (no reflow, keeps playing); we only scale it down and
+        // slide the <video> into the top-left corner of the small clipped frame.
+        playerView.layoutParams = FrameLayout.LayoutParams(fw, fh)
+        playerView.pivotX = 0f
+        playerView.pivotY = 0f
+        playerView.scaleX = s.toFloat()
+        playerView.scaleY = s.toFloat()
+        playerView.translationX = (-l * pxPerCss * s).toFloat()
+        playerView.translationY = (-t * pxPerCss * s).toFloat()
+
+        val lp = FrameLayout.LayoutParams(miniW, miniH, Gravity.BOTTOM or Gravity.END)
+        val m = (12 * d).toInt()
+        lp.setMargins(0, 0, m, m)
+        playerFrame.layoutParams = lp
+        miniControls.visibility = View.VISIBLE
+        mode = Mode.MINI
+    }
+
+    private fun closePlayer() {
+        mode = Mode.NONE
+        playerVideoId = null
+        relatedPager = null
+        relatedForId = null
+        miniControls.visibility = View.GONE
+        playerView.scaleX = 1f
+        playerView.scaleY = 1f
+        playerView.translationX = 0f
+        playerView.translationY = 0f
+        playerView.layoutParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        playerFrame.layoutParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        playerView.loadUrl("about:blank")
+        playerFrame.visibility = View.GONE
+        videoGate.onUrl("about:blank")
+    }
+
+    private fun toggleMiniPlay() {
+        // The tap was on a native button, so let the page start playback for this moment only
+        playerView.settings.mediaPlaybackRequiresUserGesture = false
+        playerView.evaluateJavascript(
+            "(function(){var v=document.querySelector('video');if(v){if(v.paused){v.play();}else{v.pause();}}})()",
+            null
+        )
+        handler.postDelayed({ playerView.settings.mediaPlaybackRequiresUserGesture = true }, 1500L)
+    }
+
+    private fun updateMiniPlayIcon() {
+        playerView.evaluateJavascript(
+            "(function(){var v=document.querySelector('video');return v?(v.paused?'1':'0'):'';})()"
+        ) { r ->
+            miniPlay.text = if (r != null && r.contains("1")) "▶" else "⏸"
+        }
+    }
+
     override fun onResume() {
         super.onResume()
+        active = true
         handler.post(urlWatcher)
     }
 
     override fun onPause() {
+        active = false
         handler.removeCallbacks(urlWatcher)
         super.onPause()
     }
@@ -290,7 +598,7 @@ class StudyWebViewActivity : AppCompatActivity() {
         loadSearch(q)
     }
 
-    private val feedExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val feedExecutor = Executors.newSingleThreadExecutor()
     private var feedToken = 0
 
     /** Study-only results shown as YouTube-style cards; falls back to the normal results page. */
@@ -299,7 +607,9 @@ class StudyWebViewActivity : AppCompatActivity() {
         val url = "https://m.youtube.com/results?search_query=${Uri.encode(query)}" +
             "&sp=${Uri.encode(videoOnlyFilter)}"
         searchBar.setText(query)
+        if (mode == Mode.FULL) minimizePlayer()      // keep the video playing in the mini player
         val my = ++feedToken
+        feedPager = null
         feedExecutor.execute {
             val cards = try { StudyFeed.fetch(query) } catch (_: Exception) { emptyList() }
             runOnUiThread {
@@ -307,6 +617,7 @@ class StudyWebViewActivity : AppCompatActivity() {
                 if (cards.isEmpty()) {
                     webView.loadUrl(url)
                 } else {
+                    feedPager = StudyFeed.Pager(query, cards.map { it.id }, 1)
                     webView.loadDataWithBaseURL(
                         url, StudyFeed.renderHtml(query, cards),
                         "text/html", "UTF-8", url
@@ -319,13 +630,6 @@ class StudyWebViewActivity : AppCompatActivity() {
     private fun hideKeyboard() {
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(searchBar.windowToken, 0)
-    }
-
-    // ── URL filter for normal page loads ─────────────────────────────────────
-    private fun filterUrl(raw: String): Boolean {
-        val reason = blockReason(raw) ?: return false
-        Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
-        return true
     }
 
     // ── Inject CSS to hide non-study elements ────────────────────────────────
@@ -407,21 +711,31 @@ class StudyWebViewActivity : AppCompatActivity() {
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
+    /** Back: leave fullscreen -> minimize the video -> results history -> close the study screen. */
+    private fun handleBack() {
         when {
             customView != null -> exitFullscreen()
+            mode == Mode.FULL -> minimizePlayer()
             webView.canGoBack() -> webView.goBack()
             else -> finish()
         }
     }
 
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        handleBack()
+    }
+
     override fun onDestroy() {
         exitFullscreen()
         feedToken++
+        relatedToken++
         feedExecutor.shutdownNow()
+        moreExecutor.shutdownNow()
         handler.removeCallbacks(urlWatcher)
         videoGate.destroy()
+        playerView.stopLoading()
+        playerView.destroy()
         webView.stopLoading()
         webView.destroy()
         super.onDestroy()

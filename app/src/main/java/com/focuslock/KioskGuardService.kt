@@ -65,12 +65,37 @@ class KioskGuardService : Service() {
     )
 
     private var loops = 0L
+    private val updating = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Silent self-update: newer GitHub release -> download -> signature check -> `pm install -r` (root).
+     * Waits while the study screen is open; falls back to the normal install prompt if root fails.
+     */
+    private fun autoUpdateAsync() {
+        if (!updating.compareAndSet(false, true)) return
+        Thread {
+            try {
+                val r = Updater.latest() ?: return@Thread
+                if (r.code <= BuildConfig.VERSION_CODE) return@Thread
+                val apk = Updater.download(this, r) ?: return@Thread
+                if (StudyWebViewActivity.active) return@Thread   // try again next round
+                val out = runRoot("pm install -r -d '${apk.absolutePath}' 2>&1")
+                if (out == null || !out.contains("Success")) Updater.install(this, apk)
+            } catch (_: Exception) {
+            } finally {
+                updating.set(false)
+            }
+        }.start()
+    }
 
     /** Time keeping: real network time, "automatic date & time" kept ON, checkpoint kept outside app data. */
     private fun housekeeping() {
         // network time: every 10 min, or every 30 s until the first successful sync of this boot
         val period = if (TrustedClock.isVerified()) 600L else 30L
         if (loops % period == 2L) TrustedClock.syncAsync(this)
+
+        // look for a new version 1 min after start, then every 15 min
+        if (loops % 900L == 60L) autoUpdateAsync()
 
         if (loops % 30L == 1L) {
             // the phone must follow network time; undo a manual switch to "off"

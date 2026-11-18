@@ -57,7 +57,11 @@ class VideoGate(
         if (!Regex("^[A-Za-z0-9_-]{6,20}$").matches(id)) { reject("bad video id"); return }
 
         val known = cache[id]
-        if (known == true) { overlay.visibility = View.GONE; return }
+        if (known == true) {
+            overlay.visibility = View.GONE
+            handler.postDelayed({ startPlayback() }, 1200L)
+            return
+        }
         if (known == false) { reject("blocked earlier"); return }
 
         overlay.visibility = View.VISIBLE
@@ -147,6 +151,16 @@ class VideoGate(
         apply(id, my, VideoJudge.Verdict(ok, if (ok) "keyword match" else "check timed out", "timeout"))
     }
 
+    /** The tap that opened the video happened in another WebView, so allow playback for a moment. */
+    private fun startPlayback() {
+        webView.settings.mediaPlaybackRequiresUserGesture = false
+        webView.evaluateJavascript(
+            "document.querySelectorAll('video').forEach(function(v){try{v.play()}catch(e){}})",
+            null
+        )
+        handler.postDelayed({ webView.settings.mediaPlaybackRequiresUserGesture = true }, 2500L)
+    }
+
     private fun apply(id: String, my: Int, v: VideoJudge.Verdict) {
         if (my != token || activity.isFinishing) return
         cache[id] = v.study
@@ -155,10 +169,7 @@ class VideoGate(
         }
         if (v.study) {
             overlay.visibility = View.GONE
-            webView.evaluateJavascript(
-                "document.querySelectorAll('video').forEach(function(v){try{v.play()}catch(e){}})",
-                null
-            )
+            startPlayback()
         } else {
             reject(v.reason)
         }

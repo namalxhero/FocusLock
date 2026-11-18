@@ -119,46 +119,95 @@
         android:layout_height="1dp"
         android:background="#272727" />
 
-    <!-- ══ Video surface ══ -->
+    <!-- ══ Video surface: results behind, player (full screen or mini) on top ══ -->
     <FrameLayout
+        android:id="@+id/surface"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
 
+        <!-- Study results (cards) -->
         <WebView
             android:id="@+id/studyWebView"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
+        <!-- Player: fills the surface, or shrinks to a mini player at the bottom-right -->
         <FrameLayout
-            android:id="@+id/checkOverlay"
+            android:id="@+id/playerFrame"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="#D9000000"
-            android:visibility="gone"
-            android:clickable="true"
-            android:focusable="true">
+            android:background="#000000"
+            android:visibility="gone">
 
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:orientation="vertical"
-                android:gravity="center">
+            <WebView
+                android:id="@+id/playerWebView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
 
-                <ProgressBar
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:indeterminateTint="#FF0000" />
+            <FrameLayout
+                android:id="@+id/checkOverlay"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#D9000000"
+                android:visibility="gone"
+                android:clickable="true"
+                android:focusable="true">
 
-                <TextView
+                <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:text="Checking study content…"
+                    android:layout_gravity="center"
+                    android:orientation="vertical"
+                    android:gravity="center">
+
+                    <ProgressBar
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:indeterminateTint="#FF0000" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="Checking study content…"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp" />
+                </LinearLayout>
+            </FrameLayout>
+
+            <!-- Mini player controls (tap anywhere else = open full screen) -->
+            <FrameLayout
+                android:id="@+id/miniControls"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone"
+                android:clickable="true"
+                android:focusable="true">
+
+                <TextView
+                    android:id="@+id/miniPlay"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_gravity="center"
+                    android:gravity="center"
+                    android:text="⏸"
                     android:textColor="#FFFFFF"
-                    android:textSize="14sp" />
-            </LinearLayout>
+                    android:textSize="18sp"
+                    android:background="@drawable/bg_mini_btn" />
+
+                <TextView
+                    android:id="@+id/miniClose"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="top|end"
+                    android:layout_margin="4dp"
+                    android:gravity="center"
+                    android:text="✕"
+                    android:textColor="#FFFFFF"
+                    android:textSize="13sp"
+                    android:background="@drawable/bg_mini_btn" />
+            </FrameLayout>
         </FrameLayout>
     </FrameLayout>
 

@@ -51,6 +51,7 @@ object Updater {
     }
 
     /** Downloads the APK and checks it is signed by the SAME key as the installed app. */
+    @Synchronized
     fun download(ctx: Context, r: Release): File? {
         val dir = File(ctx.cacheDir, "update").apply { mkdirs() }
         val out = File(dir, "FocusLock-${r.code}.apk")
