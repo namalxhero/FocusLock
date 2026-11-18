@@ -56,6 +56,9 @@ class VideoGate(
 
         if (!Regex("^[A-Za-z0-9_-]{6,20}$").matches(id)) { reject("bad video id"); return }
 
+        // Opened from our own study results: already vetted, no need to ask the AI again
+        if (StudyFeed.isTrusted(id)) cache[id] = true
+
         val known = cache[id]
         if (known == true) {
             overlay.visibility = View.GONE

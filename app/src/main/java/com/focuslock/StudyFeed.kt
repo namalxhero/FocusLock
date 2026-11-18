@@ -25,8 +25,19 @@ object StudyFeed {
     private val ID_RE = Regex("^[A-Za-z0-9_-]{6,20}$")
     private const val MAX_CARDS = 30
 
+    // Videos we listed ourselves (study searches, already filtered): no AI re-check needed
+    private val trusted: MutableSet<String> = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    fun isTrusted(id: String): Boolean = trusted.contains(id)
+
     // ── Fetch ────────────────────────────────────────────────────────────────
     fun fetch(query: String): List<Card> {
+        val cards = fetchRaw(query)
+        for (c in cards) trusted.add(c.id)
+        return cards
+    }
+
+    private fun fetchRaw(query: String): List<Card> {
         val q = URLEncoder.encode(query, "UTF-8")
         // sp=EgIQAQ%3D%3D  ->  "Type: Video" (no playlists / channels / shorts shelves)
         val conn = URL("https://www.youtube.com/results?search_query=$q&sp=EgIQAQ%3D%3D&hl=en")
